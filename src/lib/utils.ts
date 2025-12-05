@@ -45,3 +45,37 @@ function getGuildInfo(guild: Guild | null) {
 	if (guild === null) return 'Direct Messages';
 	return `${guild.name}[${cyan(guild.id)}]`;
 }
+
+/**
+ * Fisher-Yates shuffle algorithm
+ * Returns a new shuffled array without modifying the original
+ * @param array - Array to shuffle
+ * @returns New shuffled array
+ */
+export function shuffle<T>(array: T[]): T[] {
+	const result = [...array];
+	for (let i = result.length - 1; i > 0; i--) {
+		const j = Math.floor(Math.random() * (i + 1));
+		[result[i], result[j]] = [result[j], result[i]];
+	}
+	return result;
+}
+
+/**
+ * Format ELO change for display
+ * @param change - ELO delta (positive or negative)
+ * @returns Formatted string with +/- prefix
+ */
+export function formatEloChange(change: number): string {
+	if (change === 0) return '±0';
+	return change > 0 ? `+${change}` : `${change}`;
+}
+
+/**
+ * Format percentage with 1 decimal place
+ * @param value - Percentage value (0-100)
+ * @returns Formatted string with % suffix
+ */
+export function formatPercentage(value: number): string {
+	return `${value.toFixed(1)}%`;
+}
