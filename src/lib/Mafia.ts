@@ -1,5 +1,5 @@
-import { Collection, GuildMember, Snowflake } from 'discord.js';
-import { DatabaseService, GameState, type PlayerRecord, type EloUpdate } from './database';
+import { Collection, type GuildMember, type Snowflake } from 'discord.js';
+import { type DatabaseService, type EloUpdate, GameState, type PlayerRecord } from './database';
 import { EloCalculator } from './elo';
 import { shuffle } from './utils';
 
@@ -30,24 +30,24 @@ export class MafiaGame {
 	 */
 	async initialize(): Promise<void> {
 		const guild = await this.db.getOrCreateGuild(this.guildId);
-		this.numMafia = guild.num_mafia;
-		this.gameState = guild.game_state as GameState;
+		this.numMafia = guild.numMafia;
+		this.gameState = guild.gameState as GameState;
 
 		// Load players from database
 		const players = await this.db.getGuildPlayers(this.guildId);
 		this.players.clear();
 		for (const record of players) {
-			this.players.set(record.user_id, MafiaPlayer.fromRecord(record));
+			this.players.set(record.userId, MafiaPlayer.fromRecord(record));
 		}
 
 		// Restore active round if exists
-		if (guild.in_progress) {
+		if (guild.inProgress) {
 			const round = await this.db.getActiveRound(this.guildId);
 			if (round) {
-				this.activePlayerIds = guild.active_player_ids;
-				this.subs = guild.sub_player_ids;
-				this.mafiaIds = new Set(round.mafia_ids);
-				this.innocentIds = new Set(round.innocent_ids);
+				this.activePlayerIds = guild.activePlayerIds;
+				this.subs = guild.subPlayerIds;
+				this.mafiaIds = new Set(round.mafiaIds);
+				this.innocentIds = new Set(round.innocentIds);
 				this.votes = new Map(Object.entries(round.votes || {}));
 
 				// Restore team assignments
@@ -82,8 +82,8 @@ export class MafiaGame {
 		this.players.delete(id);
 
 		// Remove from active arrays
-		this.activePlayerIds = this.activePlayerIds.filter(x => x !== id);
-		this.subs = this.subs.filter(x => x !== id);
+		this.activePlayerIds = this.activePlayerIds.filter((x) => x !== id);
+		this.subs = this.subs.filter((x) => x !== id);
 
 		// Remove votes
 		this.votes.delete(id);
@@ -171,6 +171,7 @@ export class MafiaGame {
 		const shuffled = shuffle(this.activePlayerIds);
 		for (let i = 0; i < shuffled.length; i++) {
 			const id = shuffled[i];
+			if (!id) continue;
 			const player = this.players.get(id);
 			if (!player) continue;
 			player.team = (i % 2 === 0 ? 1 : 2) as 1 | 2;
@@ -280,7 +281,7 @@ export class MafiaGame {
 	getLeaderboard(): Array<{ name: string; elo: number; score: number; mafia: boolean }> {
 		return Array.from(this.players.values())
 			.sort((a, b) => b.elo - a.elo)
-			.map(p => ({
+			.map((p) => ({
 				name: p.displayName,
 				elo: p.elo,
 				score: p.elo, // For backward compatibility with old code
@@ -334,21 +335,21 @@ export class MafiaPlayer {
 
 		if (record) {
 			this.elo = record.elo;
-			this.totalRounds = record.total_rounds;
-			this.mafiaRounds = record.mafia_rounds;
-			this.mafiaWins = record.mafia_wins;
-			this.correctVotes = record.correct_votes;
-			this.totalVotes = record.total_votes;
-			this.peakElo = record.peak_elo;
+			this.totalRounds = record.totalRounds;
+			this.mafiaRounds = record.mafiaRounds;
+			this.mafiaWins = record.mafiaWins;
+			this.correctVotes = record.correctVotes;
+			this.totalVotes = record.totalVotes;
+			this.peakElo = record.peakElo;
 		}
 	}
 
 	static fromRecord(record: PlayerRecord, member?: GuildMember): MafiaPlayer {
 		// Create a pseudo GuildMember if not provided
 		if (!member) {
-			const player = new MafiaPlayer({ id: record.user_id, displayName: record.display_name } as GuildMember, record);
-			player.userId = record.user_id;
-			player.displayName = record.display_name;
+			const player = new MafiaPlayer({ id: record.userId, displayName: record.displayName || 'Unknown' } as GuildMember, record);
+			player.userId = record.userId;
+			player.displayName = record.displayName || 'Unknown';
 			return player;
 		}
 		return new MafiaPlayer(member, record);

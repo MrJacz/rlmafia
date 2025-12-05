@@ -37,8 +37,8 @@ export class EloCalculator {
 		const results: EloCalculationResult[] = [];
 
 		// Determine if mafia won (their team lost AND they weren't voted out)
-		const mafiaVotedOut = this.wasMafiaVotedOut(mafiaIds, votes);
-		const mafiaTeamLost = Array.from(mafiaIds).every(id => playerTeams[id] !== winningTeam);
+		const mafiaVotedOut = EloCalculator.wasMafiaVotedOut(mafiaIds, votes);
+		const mafiaTeamLost = Array.from(mafiaIds).every((id) => playerTeams[id] !== winningTeam);
 		const mafiaWon = mafiaTeamLost && !mafiaVotedOut;
 
 		// Calculate mafia ELO
@@ -46,14 +46,14 @@ export class EloCalculator {
 			if (mafiaWon) {
 				results.push({
 					userId: mafiaId,
-					eloDelta: this.MAFIA_WIN,
+					eloDelta: EloCalculator.MAFIA_WIN,
 					reason: 'Mafia win: team lost, not voted out'
 				});
 			} else {
 				const reason = mafiaVotedOut ? 'voted out' : 'team won';
 				results.push({
 					userId: mafiaId,
-					eloDelta: this.MAFIA_LOSS,
+					eloDelta: EloCalculator.MAFIA_LOSS,
 					reason: `Mafia loss: ${reason}`
 				});
 			}
@@ -67,7 +67,7 @@ export class EloCalculator {
 			const correct = mafiaIds.has(suspectId);
 			results.push({
 				userId: voterId,
-				eloDelta: correct ? this.CORRECT_VOTE : this.INCORRECT_VOTE,
+				eloDelta: correct ? EloCalculator.CORRECT_VOTE : EloCalculator.INCORRECT_VOTE,
 				reason: correct ? 'Correct vote' : 'Incorrect vote'
 			});
 		}
@@ -83,10 +83,7 @@ export class EloCalculator {
 	 * @param votes - Map of voterId -> suspectId
 	 * @returns True if mafia received majority of innocent votes
 	 */
-	private static wasMafiaVotedOut(
-		mafiaIds: Set<string>,
-		votes: Record<string, string>
-	): boolean {
+	private static wasMafiaVotedOut(mafiaIds: Set<string>, votes: Record<string, string>): boolean {
 		const voteCounts: Record<string, number> = {};
 		let totalInnocentVotes = 0;
 
@@ -103,7 +100,7 @@ export class EloCalculator {
 
 		// Check if any mafia received majority
 		for (const mafiaId of mafiaIds) {
-			if (voteCounts[mafiaId] >= majority) {
+			if ((voteCounts[mafiaId] ?? 0) >= majority) {
 				return true;
 			}
 		}

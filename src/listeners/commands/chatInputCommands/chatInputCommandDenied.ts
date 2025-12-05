@@ -1,5 +1,5 @@
 import type { ChatInputCommandDeniedPayload, Events } from '@sapphire/framework';
-import { Listener, UserError } from '@sapphire/framework';
+import { Listener, type UserError } from '@sapphire/framework';
 
 export class UserEvent extends Listener<typeof Events.ChatInputCommandDenied> {
 	public override async run({ context, message: content }: UserError, { interaction }: ChatInputCommandDeniedPayload) {

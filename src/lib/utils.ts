@@ -1,8 +1,8 @@
 import {
-	container,
 	type ChatInputCommandSuccessPayload,
 	type Command,
 	type ContextMenuCommandSuccessPayload,
+	container,
 	type MessageCommandSuccessPayload
 } from '@sapphire/framework';
 import { cyan } from 'colorette';
@@ -56,7 +56,9 @@ export function shuffle<T>(array: T[]): T[] {
 	const result = [...array];
 	for (let i = result.length - 1; i > 0; i--) {
 		const j = Math.floor(Math.random() * (i + 1));
-		[result[i], result[j]] = [result[j], result[i]];
+		const temp = result[i]!;
+		result[i] = result[j]!;
+		result[j] = temp;
 	}
 	return result;
 }

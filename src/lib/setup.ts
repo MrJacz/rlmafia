@@ -4,9 +4,9 @@ process.env.NODE_ENV ??= 'development';
 import { ApplicationCommandRegistries, container, RegisterBehavior } from '@sapphire/framework';
 import '@sapphire/plugin-logger/register';
 import '@sapphire/plugin-editable-commands/register';
+import { join } from 'node:path';
 import { type ArrayString, setup } from '@skyra/env-utilities';
 import * as colorette from 'colorette';
-import { join } from 'node:path';
 import { srcDir } from './constants';
 import { DatabaseService } from './database';
 import { MafiaManager } from './Mafia';
@@ -26,7 +26,7 @@ db.connect()
 	.then(() => {
 		container.logger.info('Database connected successfully');
 	})
-	.catch(error => {
+	.catch((error) => {
 		container.logger.error('Failed to connect to database:', error);
 		process.exit(1);
 	});
