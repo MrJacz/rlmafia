@@ -1,117 +1,237 @@
 # Database Setup Guide
 
-## Prerequisites
+This bot uses **PostgreSQL with Prisma ORM** for persistent storage of player ELO ratings and game history.
 
-1. Install PostgreSQL:
-   - **macOS**: `brew install postgresql && brew services start postgresql`
-   - **Ubuntu/Debian**: `sudo apt install postgresql postgresql-contrib`
-   - **Windows**: Download from [postgresql.org](https://www.postgresql.org/download/)
+## Quick Start
 
-2. Ensure PostgreSQL is running:
-   ```bash
-   # Check if running
-   pg_isready
+### 1. Install PostgreSQL
 
-   # Start if needed (macOS)
-   brew services start postgresql
+**Option A: Docker (Recommended)**
+```bash
+docker run --name rlmafia-postgres -e POSTGRES_PASSWORD=password -p 5432:5432 -d postgres:16
+```
 
-   # Start if needed (Linux)
-   sudo systemctl start postgresql
-   ```
+**Option B: Local Installation**
+- **macOS**: `brew install postgresql@16 && brew services start postgresql`
+- **Ubuntu/Debian**: `sudo apt install postgresql-16 postgresql-contrib`
+- **Windows**: Download from [postgresql.org](https://www.postgresql.org/download/)
 
-## Database Creation
+### 2. Create Database
 
-1. Create the database:
-   ```bash
-   createdb rlmafia
-   ```
+```bash
+# Connect to PostgreSQL
+psql -U postgres
 
-2. Run the schema:
-   ```bash
-   psql rlmafia < schema.sql
-   ```
+# Create database
+CREATE DATABASE rlmafia;
 
-   Or manually:
-   ```bash
-   psql rlmafia
-   # Then paste the contents of schema.sql
-   ```
+# Exit
+\q
+```
 
-3. Verify tables were created:
-   ```bash
-   psql rlmafia -c "\dt"
-   ```
+Or using command line:
+```bash
+createdb rlmafia
+```
 
-   You should see:
-   - guilds
-   - players
-   - active_rounds
-   - game_history
-   - schema_migrations
+### 3. Configure Environment Variables
 
-## Environment Configuration
+Create a `.env` file in the project root:
 
-1. Copy or edit `src/.env`:
-   ```bash
-   cd src
-   cp .env .env.local  # if you want to keep original
-   ```
+```env
+# Discord Bot
+DISCORD_TOKEN=your_discord_bot_token_here
+OWNERS=["your_discord_user_id"]
 
-2. Add the DATABASE_URL:
-   ```
-   DISCORD_TOKEN=your_bot_token_here
-   DATABASE_URL=postgresql://localhost/rlmafia
-   OWNERS=["your_discord_user_id"]
-   ```
+# Database (Prisma)
+DATABASE_URL="postgresql://postgres:password@localhost:5432/rlmafia?schema=public"
+```
 
-   For custom PostgreSQL settings:
-   ```
-   DATABASE_URL=postgresql://username:password@localhost:5432/rlmafia
-   ```
+**Connection String Format**:
+`postgresql://USER:PASSWORD@HOST:PORT/DATABASE?schema=SCHEMA`
 
-## Testing the Connection
+### 4. Run Prisma Migrations
 
-1. Build the bot:
-   ```bash
-   export PATH="$HOME/.bun/bin:$PATH"
-   bun run build
-   ```
+```bash
+# Install dependencies
+npm install
 
-2. Start the bot:
-   ```bash
-   bun run dev
-   ```
+# Generate Prisma Client
+npm run prisma:generate
 
-3. Watch for "Database connected successfully" in the logs
+# Create and apply migrations
+npm run prisma:migrate
+
+# Or push schema directly (development only)
+npm run prisma:push
+```
+
+### 5. Verify Setup
+
+```bash
+# Open Prisma Studio to view your database
+npm run prisma:studio
+```
+
+Visit http://localhost:5555 to see your database tables and data.
+
+## Schema Overview
+
+The database uses **Prisma ORM** with the following models:
+
+- **Guild** - Per-server game configuration (numMafia, gameState, activePlayers)
+- **Player** - Player stats and ELO ratings (persistent across sessions)
+- **ActiveRound** - Current game state (roles, teams, votes)
+- **GameHistory** - Completed rounds for analytics
+- **SchemaMigration** - Tracks database schema versions
+
+### Key Features
+
+✅ **Per-server isolation**: Each Discord server has its own player database
+✅ **ELO persistence**: Ratings survive bot restarts
+✅ **Automatic migrations**: Schema changes are tracked and versioned
+✅ **Type-safe queries**: Prisma generates TypeScript types from your schema
+✅ **Cascading deletes**: Removing a guild automatically cleans up all related data
+
+## Available Scripts
+
+```bash
+# Generate Prisma Client (after schema changes)
+npm run prisma:generate
+
+# Create a new migration
+npm run prisma:migrate
+
+# Push schema without creating migration (dev only)
+npm run prisma:push
+
+# Open database GUI
+npm run prisma:studio
+
+# Reset database (WARNING: deletes all data)
+npx prisma migrate reset
+
+# View migration status
+npx prisma migrate status
+
+# Format Prisma schema
+npx prisma format
+```
 
 ## Troubleshooting
 
-### Connection refused
-- Ensure PostgreSQL is running: `pg_isready`
-- Check if port 5432 is in use: `lsof -i :5432`
+### Connection Errors
 
-### Authentication failed
-- Update DATABASE_URL with correct username/password
-- Default PostgreSQL user is usually your system username
+If you see `P1000: Authentication failed`:
+1. Check your `DATABASE_URL` in `.env`
+2. Verify PostgreSQL is running: `pg_isready`
+3. Test connection: `psql $DATABASE_URL`
+4. Check PostgreSQL logs: `tail -f /usr/local/var/log/postgres.log` (macOS)
 
-### Database doesn't exist
-- Run: `createdb rlmafia`
+### Migration Issues
 
-### Permission denied
-- Grant permissions: `psql -c "GRANT ALL PRIVILEGES ON DATABASE rlmafia TO your_username;"`
+If migrations fail:
+```bash
+# View current status
+npx prisma migrate status
+
+# Reset and start fresh (WARNING: deletes data)
+npx prisma migrate reset
+
+# Mark migrations as applied without running
+npx prisma migrate resolve --applied <migration_name>
+```
+
+### Prisma Client Not Found
+
+If you see "Cannot find module '@prisma/client'":
+```bash
+npm install
+npm run prisma:generate
+```
+
+### Port Already in Use
+
+If PostgreSQL won't start (port 5432 in use):
+```bash
+# Find process using port
+lsof -i :5432
+
+# Kill it if needed
+kill -9 <PID>
+```
+
+## Making Schema Changes
+
+When modifying `prisma/schema.prisma`:
+
+1. **Edit the schema file** with your changes
+2. **Format the schema**: `npx prisma format`
+3. **Create migration**: `npm run prisma:migrate`
+4. **Name your migration** descriptively (e.g., "add_player_stats")
+5. **Commit both files**: `schema.prisma` and the new migration file
+
+The migration will be automatically applied when deployed.
+
+## Production Deployment
+
+For production, use a hosted PostgreSQL service:
+
+### Recommended Providers
+
+- **Railway**: https://railway.app (Free tier, auto-deploys)
+- **Supabase**: https://supabase.com (Free tier with 500MB)
+- **Neon**: https://neon.tech (Serverless Postgres, 3GB free)
+- **AWS RDS**: https://aws.amazon.com/rds/ (Scalable, paid)
+- **Google Cloud SQL**: https://cloud.google.com/sql (Enterprise, paid)
+
+### Deployment Steps
+
+1. Create a PostgreSQL database on your chosen provider
+2. Copy the connection string
+3. Set `DATABASE_URL` environment variable in your hosting platform
+4. Deploy your bot
+5. Migrations will run automatically on first start
+
+### Production Tips
+
+- Enable SSL in production (most providers require it)
+- Use connection pooling for better performance (Prisma Accelerate)
+- Set up automated backups
+- Monitor query performance with Prisma Studio or pgAdmin
 
 ## Quick Reset (Development)
 
 To wipe and recreate the database:
 ```bash
-dropdb rlmafia && createdb rlmafia && psql rlmafia < schema.sql
+# Using Prisma
+npx prisma migrate reset
+
+# Or manually
+dropdb rlmafia && createdb rlmafia && npm run prisma:migrate
 ```
 
-## Production Deployment
+## Migration from schema.sql
 
-For production (e.g., Railway, Heroku, Render):
+If you previously used `schema.sql`, you can migrate to Prisma:
 
-1. Add DATABASE_URL environment variable in your hosting dashboard
-2. Schema will be created automatically on first connection
-3. Ensure `NODE_ENV=production` is set
-4. SSL will be enabled automatically for production databases
+1. **Backup your data** (if any exists):
+   ```bash
+   pg_dump rlmafia > backup.sql
+   ```
+
+2. **Drop the old database**:
+   ```bash
+   dropdb rlmafia
+   createdb rlmafia
+   ```
+
+3. **Run Prisma migrations**:
+   ```bash
+   npm run prisma:migrate
+   ```
+
+4. **Restore data** (if needed):
+   ```bash
+   psql rlmafia < backup.sql
+   ```
