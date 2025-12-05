@@ -1,239 +1,142 @@
+import { container } from '@sapphire/framework';
 import { Collection, type GuildMember, type Snowflake } from 'discord.js';
-import { type DatabaseService, type EloUpdate, GameState, type PlayerRecord } from './database';
+import { type EloUpdate, GameState, type PlayerRecord, PlayerTeam } from './database';
 import { EloCalculator } from './elo';
-import { shuffle } from './utils';
+import { pickTeams } from './utils';
 
 export class MafiaGame {
-	private db: DatabaseService;
 	private guildId: string;
 
-	// In-memory cache (loaded from database)
 	players: Collection<Snowflake, MafiaPlayer> = new Collection();
 	numMafia: number = 1;
 	gameState: GameState = GameState.IDLE;
 	votes: Map<Snowflake, Snowflake> = new Map();
 
-	// Round state (fixes missing property bugs)
-	activePlayerIds: string[] = [];
-	subs: string[] = [];
-	mafiaIds: Set<string> = new Set();
-	innocentIds: Set<string> = new Set();
-
-	constructor(guildId: string, db: DatabaseService) {
+	constructor(guildId: string) {
 		this.guildId = guildId;
-		this.db = db;
 	}
 
-	/**
-	 * Initialize game state from database
-	 * Called when MafiaManager creates or retrieves a game
-	 */
 	async initialize(): Promise<void> {
-		const guild = await this.db.getOrCreateGuild(this.guildId);
+		const guild = await container.db.getOrCreateGuild(this.guildId);
 		this.numMafia = guild.numMafia;
 		this.gameState = guild.gameState as GameState;
 
-		// Load players from database
-		const players = await this.db.getGuildPlayers(this.guildId);
+		const players = await container.db.getGuildPlayers(this.guildId);
 		this.players.clear();
 		for (const record of players) {
 			this.players.set(record.userId, MafiaPlayer.fromRecord(record));
 		}
 
-		// Restore active round if exists
 		if (guild.inProgress) {
-			const round = await this.db.getActiveRound(this.guildId);
+			const round = await container.db.getActiveRound(this.guildId);
 			if (round) {
-				this.activePlayerIds = guild.activePlayerIds;
-				this.subs = guild.subPlayerIds;
-				this.mafiaIds = new Set(round.mafiaIds);
-				this.innocentIds = new Set(round.innocentIds);
 				this.votes = new Map(Object.entries(round.votes || {}));
 
-				// Restore team assignments
 				for (const [userId, team] of Object.entries(round.player_teams)) {
 					const player = this.players.get(userId);
 					if (player) {
 						player.team = team;
 					}
 				}
-
-				// Restore mafia flags
-				for (const userId of this.mafiaIds) {
-					const player = this.players.get(userId);
-					if (player) {
-						player.mafia = true;
-					}
-				}
 			}
 		}
 	}
 
-	// --- player management ---
 	async addPlayer(member: GuildMember): Promise<void> {
 		if (!this.players.has(member.id)) {
-			const record = await this.db.getOrCreatePlayer(this.guildId, member.id, member.displayName);
+			const record = await container.db.getOrCreatePlayer(this.guildId, member.id, member.displayName);
 			this.players.set(member.id, MafiaPlayer.fromRecord(record, member));
 		}
 	}
 
 	async removePlayer(id: Snowflake): Promise<void> {
-		await this.db.removePlayer(this.guildId, id);
-		this.players.delete(id);
+		const player = this.players.get(id);
+		if (!player) throw new Error('Player doesnt exist');
 
-		// Remove from active arrays
-		this.activePlayerIds = this.activePlayerIds.filter((x) => x !== id);
-		this.subs = this.subs.filter((x) => x !== id);
+		player.reset();
 
-		// Remove votes
 		this.votes.delete(id);
 		for (const [voter, suspect] of Array.from(this.votes.entries())) {
 			if (suspect === id) this.votes.delete(voter);
 		}
 
-		// Remove from role sets
-		this.mafiaIds.delete(id);
-		this.innocentIds.delete(id);
-
-		// Update database
 		if (this.gameState !== GameState.IDLE) {
-			await this.db.updateGuildActivePlayers(this.guildId, this.activePlayerIds, this.subs);
+			await container.db.updateGuildActivePlayers(this.guildId, [...this.activePlayers.keys()]);
 		}
 	}
 
 	async setNumMafia(num: number): Promise<void> {
 		this.numMafia = Math.max(1, Math.floor(num));
-		await this.db.setNumMafia(this.guildId, this.numMafia);
+		await container.db.setNumMafia(this.guildId, this.numMafia);
 	}
 
-	// --- round lifecycle ---
 	async startGame(): Promise<void> {
 		if (this.players.size < 4) throw new Error('Need at least 4 players');
 
-		// Reset round state
-		this.votes.clear();
-		this.mafiaIds.clear();
-		this.innocentIds.clear();
+		await this.resetGame();
 
-		// Choose up to 8 active players, rest are subs
-		const allPlayerIds = Array.from(this.players.keys());
-		const shuffledIds = shuffle(allPlayerIds);
-
-		if (shuffledIds.length > 8) {
-			this.activePlayerIds = shuffledIds.slice(0, 8);
-			this.subs = shuffledIds.slice(8);
-		} else {
-			this.activePlayerIds = shuffledIds;
-			this.subs = [];
-		}
-
-		// Ensure requested mafia count is feasible
-		const maxMafia = Math.max(1, Math.min(2, Math.floor(this.activePlayerIds.length / 3)));
+		const maxMafia = Math.max(1, Math.min(2, Math.floor(this.activePlayers.size / 3)));
 		this.numMafia = Math.min(this.numMafia, maxMafia);
 
 		this.gameState = GameState.PLAYING;
 
-		this.assignRoles(); // roles first (fixes bug: was using undefined 'actives')
-		this.assignTeams(); // then split teams
-
-		// Build team assignments for database
-		const playerTeams: Record<string, 1 | 2> = {};
-		for (const id of this.activePlayerIds) {
-			const player = this.players.get(id);
-			if (player && player.team !== 0) {
-				playerTeams[id] = player.team as 1 | 2;
-			}
-		}
-
-		// Persist to database
-		await this.db.startRound(this.guildId, Array.from(this.mafiaIds), Array.from(this.innocentIds), playerTeams);
-		await this.db.updateGuildState(this.guildId, GameState.PLAYING, true);
-		await this.db.updateGuildActivePlayers(this.guildId, this.activePlayerIds, this.subs);
+		this.assignRoles();
+		this.assignTeams();
 	}
 
-	// --- assignments ---
 	private assignRoles(): void {
-		// Fix bug: was 'shuffle(actives)' but actives was undefined
-		const shuffled = shuffle(this.activePlayerIds);
-		const mafiaIds = shuffled.slice(0, this.numMafia);
-		const innocentIds = shuffled.slice(this.numMafia);
+		const mafiaPlayers = this.activePlayers.random(this.numMafia);
 
-		this.mafiaIds = new Set(mafiaIds);
-		this.innocentIds = new Set(innocentIds);
-
-		for (const [id, player] of this.players) {
-			player.mafia = this.mafiaIds.has(id);
-		}
+		for (const player of mafiaPlayers) player.mafia = true;
 	}
 
 	private assignTeams(): void {
-		// Shuffle actives then "deal" players to teams alternately
-		const shuffled = shuffle(this.activePlayerIds);
-		for (let i = 0; i < shuffled.length; i++) {
-			const id = shuffled[i];
-			if (!id) continue;
-			const player = this.players.get(id);
-			if (!player) continue;
-			player.team = (i % 2 === 0 ? 1 : 2) as 1 | 2;
-		}
+		const { one, two } = pickTeams(this.players.values());
+
+		for (const player of one) player.team = PlayerTeam.TEAM1;
+		for (const player of two) player.team = PlayerTeam.TEAM2;
 	}
 
-	// --- voting ---
 	registerVote(voterId: Snowflake, suspectId: Snowflake): void {
 		if (this.gameState === GameState.IDLE) throw new Error('Game not in progress');
-
-		// Only active players can vote and only for active players
-		if (!this.activePlayerIds.includes(voterId)) throw new Error('Only active players can vote');
-		if (!this.activePlayerIds.includes(suspectId)) throw new Error('You can only vote for active players');
-
 		if (voterId === suspectId) throw new Error('Cannot vote for yourself');
-
-		// Voter and suspect must exist
 		if (!this.players.has(voterId) || !this.players.has(suspectId)) throw new Error('Invalid vote');
 
 		this.votes.set(voterId, suspectId);
 	}
 
 	allVotesIn(): boolean {
-		const activeCount = this.activePlayerIds.length;
-		return this.votes.size === activeCount;
+		return this.votes.size === this.activePlayers.size;
 	}
 
-	// --- ELO scoring (replaces old calculatePoints) ---
 	async calculateElo(winningTeam: 1 | 2): Promise<Map<string, number>> {
 		if (this.gameState === GameState.IDLE) throw new Error('No round in progress');
 
-		// Build player teams map
-		const playerTeams: Record<string, 1 | 2> = {};
-		for (const id of this.activePlayerIds) {
-			const player = this.players.get(id);
-			if (player && player.team !== 0) {
-				playerTeams[id] = player.team as 1 | 2;
-			}
+		const playerTeams: Record<Snowflake, 1 | 2> = {};
+		for (const player of this.activePlayers.values()) {
+			if (player.team !== PlayerTeam.NOTEAM) playerTeams[player.userId] = player.team;
 		}
 
-		// Build votes record
 		const voteRecord: Record<string, string> = {};
-		for (const [voterId, suspectId] of this.votes) {
-			voteRecord[voterId] = suspectId;
-		}
+		for (const [voterId, suspectId] of this.votes) voteRecord[voterId] = suspectId;
 
-		// Calculate ELO changes
-		const eloResults = EloCalculator.calculateRoundElo(this.mafiaIds, winningTeam, playerTeams, voteRecord);
+		const eloResults = EloCalculator.calculateRoundElo(
+			new Set(this.mafiaPlayers.keys()),
+			winningTeam,
+			playerTeams,
+			voteRecord
+		);
 
 		const eloChanges = new Map<string, number>();
-		for (const result of eloResults) {
-			eloChanges.set(result.userId, result.eloDelta);
-		}
+		for (const result of eloResults) eloChanges.set(result.userId, result.eloDelta);
 
-		// Build database updates
 		const updates = new Map<string, EloUpdate>();
 		for (const [userId, delta] of eloChanges) {
 			const player = this.players.get(userId);
 			if (!player) continue;
 
-			const isMafia = this.mafiaIds.has(userId);
-			const votedForMafia = this.votes.has(userId) && this.mafiaIds.has(this.votes.get(userId)!);
+			const isMafia = this.mafiaPlayers.has(userId);
+			const votedForMafia = this.votes.has(userId) && this.mafiaPlayers.has(this.votes.get(userId)!);
 			const mafiaWon = delta > 0 && isMafia;
 
 			updates.set(userId, {
@@ -246,20 +149,17 @@ export class MafiaGame {
 			});
 		}
 
-		// Persist ELO changes to database
-		await this.db.bulkUpdateElo(this.guildId, updates);
-		await this.db.completeRound(this.guildId, winningTeam, Object.fromEntries(eloChanges));
+		await container.db.bulkUpdateElo(this.guildId, updates);
+		await container.db.completeRound(this.guildId, winningTeam, Object.fromEntries(eloChanges));
 
-		// Update in-memory player ELO
 		for (const [userId, delta] of eloChanges) {
 			const player = this.players.get(userId);
 			if (player) {
 				player.elo = Math.max(0, player.elo + delta);
 				player.peakElo = Math.max(player.peakElo, player.elo);
 
-				// Update stats
 				player.totalRounds++;
-				if (this.mafiaIds.has(userId)) {
+				if (this.mafiaPlayers.has(userId)) {
 					player.mafiaRounds++;
 					if (delta > 0) {
 						player.mafiaWins++;
@@ -267,7 +167,7 @@ export class MafiaGame {
 				}
 				if (this.votes.has(userId)) {
 					player.totalVotes++;
-					if (this.mafiaIds.has(this.votes.get(userId)!)) {
+					if (this.mafiaPlayers.has(this.votes.get(userId)!)) {
 						player.correctVotes++;
 					}
 				}
@@ -277,36 +177,47 @@ export class MafiaGame {
 		return eloChanges;
 	}
 
-	// --- utility / views ---
-	getLeaderboard(): Array<{ name: string; elo: number; score: number; mafia: boolean }> {
+	getLeaderboard(): Array<{ name: string; elo: number; mafia: boolean }> {
 		return Array.from(this.players.values())
 			.sort((a, b) => b.elo - a.elo)
 			.map((p) => ({
 				name: p.displayName,
 				elo: p.elo,
-				score: p.elo, // For backward compatibility with old code
 				mafia: p.mafia
 			}));
 	}
 
 	async resetGame(): Promise<void> {
 		this.gameState = GameState.IDLE;
-		this.mafiaIds.clear();
-		this.innocentIds.clear();
 		this.votes.clear();
-		this.activePlayerIds = [];
-		this.subs = [];
 
-		for (const player of this.players.values()) {
-			player.reset();
-		}
+		this.resetPlayers();
 
-		await this.db.resetRound(this.guildId);
+		await container.db.resetRound(this.guildId);
 	}
 
-	// Computed properties
+	private resetPlayers() {
+		for (const player of this.players.values()) player.reset();
+	}
+
 	get inProgress(): boolean {
 		return this.gameState !== GameState.IDLE;
+	}
+
+	get activePlayers() {
+		return this.players.filter((player) => player.active);
+	}
+
+	get mafiaPlayers() {
+		return this.activePlayers.filter((player) => player.mafia);
+	}
+
+	get teamOnePlayers() {
+		return this.activePlayers.filter((player) => player.team === PlayerTeam.TEAM1);
+	}
+
+	get teamTwoPlayers() {
+		return this.activePlayers.filter((player) => player.team === PlayerTeam.TEAM2);
 	}
 }
 
@@ -325,8 +236,9 @@ export class MafiaPlayer {
 	peakElo: number = 1000;
 
 	// Round-specific (ephemeral)
+	active: boolean = false;
 	mafia: boolean = false;
-	team: 0 | 1 | 2 = 0;
+	team: PlayerTeam = 0;
 
 	constructor(user: GuildMember, record?: PlayerRecord) {
 		this.user = user;
@@ -347,7 +259,10 @@ export class MafiaPlayer {
 	static fromRecord(record: PlayerRecord, member?: GuildMember): MafiaPlayer {
 		// Create a pseudo GuildMember if not provided
 		if (!member) {
-			const player = new MafiaPlayer({ id: record.userId, displayName: record.displayName || 'Unknown' } as GuildMember, record);
+			const player = new MafiaPlayer(
+				{ id: record.userId, displayName: record.displayName || 'Unknown' } as GuildMember,
+				record
+			);
 			player.userId = record.userId;
 			player.displayName = record.displayName || 'Unknown';
 			return player;
@@ -365,23 +280,17 @@ export class MafiaPlayer {
 
 	reset(): void {
 		this.mafia = false;
-		this.team = 0;
+		this.team = PlayerTeam.NOTEAM;
+		this.active = false;
 	}
 }
 
 export class MafiaManager extends Collection<Snowflake, MafiaGame> {
-	private db: DatabaseService;
-
-	constructor(db: DatabaseService) {
-		super();
-		this.db = db;
-	}
-
 	async add(guildId: Snowflake): Promise<MafiaGame> {
 		let game = this.get(guildId);
 		if (game) return game;
 
-		game = new MafiaGame(guildId, this.db);
+		game = new MafiaGame(guildId);
 		await game.initialize();
 		this.set(guildId, game);
 		return game;

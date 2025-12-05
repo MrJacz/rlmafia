@@ -1,11 +1,12 @@
-/**
- * Voting System for Rocket League Mafia
- *
- * Extracted voting logic for DRY principle and reusability.
- * Handles button-based voting UI with 60-second timer.
- */
-
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, EmbedBuilder, type Interaction, type Message } from 'discord.js';
+import {
+	ActionRowBuilder,
+	ButtonBuilder,
+	ButtonStyle,
+	ComponentType,
+	EmbedBuilder,
+	type Interaction,
+	type Message
+} from 'discord.js';
 import type { MafiaGame } from './Mafia';
 
 export interface VotingResult {
@@ -15,12 +16,6 @@ export interface VotingResult {
 }
 
 export class VotingSystem {
-	/**
-	 * Create voting UI with buttons for all active players
-	 *
-	 * @param game - Current mafia game instance
-	 * @returns Embed and button rows
-	 */
 	static createVotingEmbed(game: MafiaGame): {
 		embed: EmbedBuilder;
 		rows: ActionRowBuilder<ButtonBuilder>[];
@@ -30,10 +25,9 @@ export class VotingSystem {
 			.setDescription('Click the button below the player you suspect is mafia. You cannot vote for yourself.')
 			.setColor(0x00bfff);
 
-		const buttons: ButtonBuilder[] = game.activePlayerIds.map((id) => {
-			const player = game.players.get(id);
+		const buttons: ButtonBuilder[] = game.activePlayers.map((player) => {
 			const name = player?.user?.displayName ?? player?.user?.user?.username ?? 'Unknown';
-			return new ButtonBuilder().setCustomId(`vote_${id}`).setLabel(name).setStyle(ButtonStyle.Primary);
+			return new ButtonBuilder().setCustomId(`vote_${player.userId}`).setLabel(name).setStyle(ButtonStyle.Primary);
 		});
 
 		// Discord limits 5 buttons per row
@@ -45,14 +39,6 @@ export class VotingSystem {
 		return { embed, rows };
 	}
 
-	/**
-	 * Start voting collector with timeout
-	 *
-	 * @param message - Discord message to reply to
-	 * @param game - Current mafia game instance
-	 * @param timeoutMs - Timeout in milliseconds (default 60s)
-	 * @returns Voting results
-	 */
 	static async collectVotes(message: Message, game: MafiaGame, timeoutMs: number = 60_000): Promise<VotingResult> {
 		const { embed, rows } = VotingSystem.createVotingEmbed(game);
 		const sentMsg = await message.reply({ embeds: [embed], components: rows });
@@ -65,7 +51,7 @@ export class VotingSystem {
 					if (!interaction.isButton()) return false;
 					if (!interaction.customId.startsWith('vote_')) return false;
 					const voterId = interaction.user.id;
-					return game.activePlayerIds.includes(voterId) && !game.votes.has(voterId);
+					return game.activePlayers.has(voterId) && !game.votes.has(voterId);
 				}
 			});
 
@@ -75,10 +61,10 @@ export class VotingSystem {
 
 				try {
 					// Validate suspect is active player
-					if (!game.activePlayerIds.includes(suspectId)) {
+					if (!game.activePlayers.has(suspectId)) {
 						return interaction.reply({
 							content: 'You can only vote for active players.',
-							ephemeral: true
+							flags: 'Ephemeral'
 						});
 					}
 
@@ -86,7 +72,7 @@ export class VotingSystem {
 					if (voterId === suspectId) {
 						return interaction.reply({
 							content: 'You cannot vote for yourself!',
-							ephemeral: true
+							flags: 'Ephemeral'
 						});
 					}
 
@@ -94,62 +80,50 @@ export class VotingSystem {
 					game.registerVote(voterId, suspectId);
 
 					// Early stop if all votes are in
-					if (game.allVotesIn()) {
-						collector.stop('all_votes_in');
-					}
+					if (game.allVotesIn()) collector.stop('all_votes_in');
 
-					const suspectName = game.players.get(suspectId)?.user?.displayName ?? game.players.get(suspectId)?.user?.user?.username ?? 'Unknown';
+					const suspectName =
+						game.players.get(suspectId)?.user?.displayName ??
+						game.players.get(suspectId)?.user?.user?.username ??
+						'Unknown';
 
 					return interaction.reply({
 						content: `Vote registered for **${suspectName}**!`,
-						ephemeral: true
+						flags: 'Ephemeral'
 					});
-				} catch (err: any) {
+				} catch (err) {
 					return interaction.reply({
-						content: `Error: ${err.message}`,
-						ephemeral: true
+						content: `Error: ${err instanceof Error ? err.message : err}`,
+						flags: 'Ephemeral'
 					});
 				}
 			});
 
-			collector.on('end', async (_, reason) => {
+			collector.on('end', async (_, reason: 'all_votes_in' | 'timeout') => {
 				await VotingSystem.disableButtons(sentMsg, rows);
 				resolve({
 					votes: game.votes,
 					completed: reason === 'all_votes_in',
-					reason: reason as any
+					reason: reason
 				});
 			});
 		});
 	}
 
-	/**
-	 * Disable all voting buttons after voting ends
-	 *
-	 * @param message - Message containing buttons
-	 * @param rows - Button rows to disable
-	 */
 	private static async disableButtons(message: Message, rows: ActionRowBuilder<ButtonBuilder>[]): Promise<void> {
 		const disabledRows = rows.map((row) =>
-			new ActionRowBuilder<ButtonBuilder>().addComponents(...row.components.map((b) => ButtonBuilder.from(b as ButtonBuilder).setDisabled(true)))
+			new ActionRowBuilder<ButtonBuilder>().addComponents(
+				...row.components.map((b) => ButtonBuilder.from(b as ButtonBuilder).setDisabled(true))
+			)
 		);
 		await message.edit({ components: disabledRows });
 	}
 
-	/**
-	 * Create results embed showing mafia reveal and leaderboard
-	 *
-	 * @param game - Current mafia game instance
-	 * @param eloChanges - Map of userId -> ELO delta
-	 * @returns Results embed
-	 */
 	static createResultsEmbed(game: MafiaGame, eloChanges: Map<string, number>): EmbedBuilder {
 		// Mafia names
 		const mafiaNames =
-			Array.from(game.mafiaIds)
-				.filter((id) => game.activePlayerIds.includes(id))
-				.map((id) => {
-					const player = game.players.get(id);
+			game.mafiaPlayers
+				.map((player) => {
 					return `**${player?.displayName ?? player?.user?.displayName ?? 'Unknown'}**`;
 				})
 				.join(', ') || 'None';
@@ -182,6 +156,9 @@ export class VotingSystem {
 			.setTitle('Voting Complete!')
 			.setColor(0x00bfff)
 			.setDescription(`Mafia: ${mafiaNames}`)
-			.addFields({ name: 'Leaderboard', value: leaderboard.slice(0, 1000) }, { name: 'Votes', value: voteResults.slice(0, 1000) });
+			.addFields(
+				{ name: 'Leaderboard', value: leaderboard.slice(0, 1000) },
+				{ name: 'Votes', value: voteResults.slice(0, 1000) }
+			);
 	}
 }

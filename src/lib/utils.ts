@@ -7,8 +7,11 @@ import {
 } from '@sapphire/framework';
 import { cyan } from 'colorette';
 import type { APIUser, Guild, User } from 'discord.js';
+import type { MafiaPlayer } from './Mafia';
 
-export function logSuccessCommand(payload: ContextMenuCommandSuccessPayload | ChatInputCommandSuccessPayload | MessageCommandSuccessPayload): void {
+export function logSuccessCommand(
+	payload: ContextMenuCommandSuccessPayload | ChatInputCommandSuccessPayload | MessageCommandSuccessPayload
+): void {
 	let successLoggerData: ReturnType<typeof getSuccessLoggerData>;
 
 	if ('interaction' in payload) {
@@ -17,7 +20,9 @@ export function logSuccessCommand(payload: ContextMenuCommandSuccessPayload | Ch
 		successLoggerData = getSuccessLoggerData(payload.message.guild, payload.message.author, payload.command);
 	}
 
-	container.logger.debug(`${successLoggerData.shard} - ${successLoggerData.commandName} ${successLoggerData.author} ${successLoggerData.sentAt}`);
+	container.logger.debug(
+		`${successLoggerData.shard} - ${successLoggerData.commandName} ${successLoggerData.author} ${successLoggerData.sentAt}`
+	);
 }
 
 export function getSuccessLoggerData(guild: Guild | null, user: User, command: Command) {
@@ -80,4 +85,23 @@ export function formatEloChange(change: number): string {
  */
 export function formatPercentage(value: number): string {
 	return `${value.toFixed(1)}%`;
+}
+
+export function pickTeams(players: MapIterator<MafiaPlayer>): { one: MafiaPlayer[]; two: MafiaPlayer[] } {
+	const pool = [...players];
+	const teamA: MafiaPlayer[] = [];
+
+	const teamSize = Math.ceil(pool.length / 2);
+
+	while (teamA.length < teamSize) {
+		const index = Math.floor(Math.random() * pool.length);
+		teamA.push(pool[index]!);
+		pool.splice(index, 1);
+	}
+
+	const teamB = pool;
+	return {
+		one: teamA,
+		two: teamB
+	};
 }
