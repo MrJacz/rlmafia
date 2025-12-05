@@ -1,7 +1,11 @@
 import { ApplyOptions } from '@sapphire/decorators';
-import { Command } from '@sapphire/framework';
-import { ApplicationIntegrationType, InteractionContextType, type ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
-import { container } from '@sapphire/framework';
+import { Command, container } from '@sapphire/framework';
+import {
+	ApplicationIntegrationType,
+	type ChatInputCommandInteraction,
+	EmbedBuilder,
+	InteractionContextType
+} from 'discord.js';
 
 @ApplyOptions<Command.Options>({
 	description: 'Show the current Mafia game status (players, active roster, votes).',
@@ -44,12 +48,12 @@ export class UserCommand extends Command {
 		const activeIds = game.activePlayerIds;
 		const subsIds = game.subs;
 
-		const activeNames = activeIds.map((id) =>
-			game.players.get(id)?.user?.displayName ?? game.players.get(id)?.user?.user?.username ?? 'Unknown'
+		const activeNames = activeIds.map(
+			(id) => game.players.get(id)?.user?.displayName ?? game.players.get(id)?.user?.user?.username ?? 'Unknown'
 		);
 
-		const subsNames = subsIds.map((id) =>
-			game.players.get(id)?.user?.displayName ?? game.players.get(id)?.user?.user?.username ?? 'Unknown'
+		const subsNames = subsIds.map(
+			(id) => game.players.get(id)?.user?.displayName ?? game.players.get(id)?.user?.user?.username ?? 'Unknown'
 		);
 
 		const votesIn = game.votes.size;

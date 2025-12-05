@@ -1,7 +1,11 @@
 import { ApplyOptions } from '@sapphire/decorators';
-import { Command } from '@sapphire/framework';
-import { ApplicationIntegrationType, InteractionContextType, type ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
-import { container } from '@sapphire/framework';
+import { Command, container } from '@sapphire/framework';
+import {
+	ApplicationIntegrationType,
+	type ChatInputCommandInteraction,
+	EmbedBuilder,
+	InteractionContextType
+} from 'discord.js';
 
 @ApplyOptions<Command.Options>({
 	description: 'Show the ELO leaderboard for this server.',
@@ -39,25 +43,27 @@ export class UserCommand extends Command {
 			// Build leaderboard embed
 			const lines = players.map((p, i) => {
 				const rank = i + 1;
-				const medal = rank === 1 ? '>G' : rank === 2 ? '>H' : rank === 3 ? '>I' : `${rank}.`;
-				const winRate = p.mafia_rounds > 0 ? ((p.mafia_wins / p.mafia_rounds) * 100).toFixed(1) : '0.0';
-				const guessRate = p.total_votes > 0 ? ((p.correct_votes / p.total_votes) * 100).toFixed(1) : '0.0';
+				const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
+				const winRate = p.mafiaRounds > 0 ? ((p.mafiaWins / p.mafiaRounds) * 100).toFixed(1) : '0.0';
+				const guessRate = p.totalVotes > 0 ? ((p.correctVotes / p.totalVotes) * 100).toFixed(1) : '0.0';
 
-				return `${medal} **${p.display_name}**  ${p.elo} ELO\n` +
-					`    ${p.total_rounds} games | Mafia WR: ${winRate}% | Guess: ${guessRate}%`;
+				return (
+					`${medal} **${p.displayName}** — ${p.elo} ELO\n` +
+					`    ${p.totalRounds} games | Mafia WR: ${winRate}% | Guess: ${guessRate}%`
+				);
 			});
 
 			const description = lines.join('\n').slice(0, 4000);
 
 			const embed = new EmbedBuilder()
-				.setTitle('<� Mafia ELO Leaderboard')
+				.setTitle('🏆 Mafia ELO Leaderboard')
 				.setColor(0x00bfff)
 				.setDescription(description)
 				.setFooter({ text: `Showing top ${players.length} players` });
 
 			return interaction.editReply({ embeds: [embed] });
-		} catch (err: any) {
-			return interaction.editReply({ content: `Error: ${err?.message ?? String(err)}` });
+		} catch (err) {
+			return interaction.editReply({ content: `Error: ${err instanceof Error ? err.message : err}` });
 		}
 	}
 }

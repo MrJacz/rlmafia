@@ -1,7 +1,6 @@
 import { ApplyOptions } from '@sapphire/decorators';
-import { Command } from '@sapphire/framework';
-import { ApplicationIntegrationType, InteractionContextType, type ChatInputCommandInteraction } from 'discord.js';
-import { container } from '@sapphire/framework';
+import { Command, container } from '@sapphire/framework';
+import { ApplicationIntegrationType, type ChatInputCommandInteraction, InteractionContextType } from 'discord.js';
 
 @ApplyOptions<Command.Options>({
 	description: 'Reset game state and remove all players (admin only).',
@@ -28,17 +27,12 @@ export class UserCommand extends Command {
 		await interaction.deferReply({ ephemeral: true });
 
 		try {
-			// Delete guild record from database (cascades to players and rounds)
-			await container.db.query('DELETE FROM guilds WHERE guild_id = $1', [guild.id]);
-
-			// Remove from in-memory cache
-			container.mafia.delete(guild.id);
-
+			(await container.mafia.add(guild.id)).resetGame();
 			return interaction.editReply({
 				content: 'Game completely reset. All players, ELO ratings, and history have been removed for this server.'
 			});
-		} catch (err: any) {
-			return interaction.editReply({ content: `Error: ${err?.message ?? String(err)}` });
+		} catch (err) {
+			return interaction.editReply({ content: `Error: ${err instanceof Error ? err.message : err}` });
 		}
 	}
 }

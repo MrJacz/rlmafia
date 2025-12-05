@@ -1,9 +1,8 @@
 import { ApplyOptions } from '@sapphire/decorators';
-import { Command } from '@sapphire/framework';
-import { ApplicationIntegrationType, InteractionContextType, type ChatInputCommandInteraction } from 'discord.js';
-import { container } from '@sapphire/framework';
-import { VotingSystem } from '../../lib/voting';
+import { Command, container } from '@sapphire/framework';
+import { ApplicationIntegrationType, type ChatInputCommandInteraction, InteractionContextType } from 'discord.js';
 import { GameState } from '../../lib/database';
+import { VotingSystem } from '../../lib/voting';
 
 @ApplyOptions<Command.Options>({
 	description: 'Report the winning team and start mafia voting.',
@@ -51,7 +50,7 @@ export class UserCommand extends Command {
 			return;
 		}
 
-		if (game.activePlayerIds.length === 0) {
+		if (game.activePlayers.size === 0) {
 			await interaction.reply({ content: 'No active players to vote on.', ephemeral: true });
 			return;
 		}
@@ -74,7 +73,7 @@ export class UserCommand extends Command {
 		const votingMsg = await interaction.channel.send({ embeds: [embed], components: rows });
 
 		// Collect votes (60 second timeout)
-		await VotingSystem.collectVotes(votingMsg as any, game, 60_000);
+		await VotingSystem.collectVotes(votingMsg, game, 60_000);
 
 		// Update state to resolving
 		await container.db.updateGuildState(guildId, GameState.RESOLVING);

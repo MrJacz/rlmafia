@@ -1,7 +1,12 @@
 import { ApplyOptions } from '@sapphire/decorators';
-import { Command } from '@sapphire/framework';
-import { ApplicationIntegrationType, InteractionContextType, type GuildMember, type ChatInputCommandInteraction } from 'discord.js';
-import { container } from '@sapphire/framework';
+import { Command, container } from '@sapphire/framework';
+import {
+	ApplicationCommandType,
+	ApplicationIntegrationType,
+	type ChatInputCommandInteraction,
+	type GuildMember,
+	InteractionContextType
+} from 'discord.js';
 
 @ApplyOptions<Command.Options>({
 	description: 'Join the current Mafia game.',
@@ -12,9 +17,18 @@ export class UserCommand extends Command {
 		const integrationTypes: ApplicationIntegrationType[] = [ApplicationIntegrationType.GuildInstall];
 		const contexts: InteractionContextType[] = [InteractionContextType.Guild];
 
+		// Register Chat Input command
 		registry.registerChatInputCommand({
 			name: this.name,
 			description: this.description,
+			integrationTypes,
+			contexts
+		});
+
+		// Register Context Menu command available from any message
+		registry.registerContextMenuCommand({
+			name: this.name,
+			type: ApplicationCommandType.Message,
 			integrationTypes,
 			contexts
 		});

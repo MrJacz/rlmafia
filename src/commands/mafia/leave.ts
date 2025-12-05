@@ -1,7 +1,6 @@
 import { ApplyOptions } from '@sapphire/decorators';
-import { Command } from '@sapphire/framework';
-import { ApplicationIntegrationType, InteractionContextType, type ChatInputCommandInteraction } from 'discord.js';
-import { container } from '@sapphire/framework';
+import { Command, container } from '@sapphire/framework';
+import { ApplicationIntegrationType, type ChatInputCommandInteraction, InteractionContextType } from 'discord.js';
 
 @ApplyOptions<Command.Options>({
 	description: 'Leave the Mafia game.',
@@ -27,7 +26,10 @@ export class UserCommand extends Command {
 		const game = await container.mafia.add(guild.id);
 
 		if (game.inProgress) {
-			return interaction.reply({ content: 'Cannot leave during an active round. Wait for the round to end.', ephemeral: true });
+			return interaction.reply({
+				content: 'Cannot leave during an active round. Wait for the round to end.',
+				ephemeral: true
+			});
 		}
 
 		if (!game.players.has(interaction.user.id)) {

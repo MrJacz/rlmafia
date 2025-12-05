@@ -1,8 +1,11 @@
 import { ApplyOptions } from '@sapphire/decorators';
-import { Command } from '@sapphire/framework';
-import { ApplicationIntegrationType, InteractionContextType, type ChatInputCommandInteraction } from 'discord.js';
-import { EmbedBuilder } from 'discord.js';
-import { container } from '@sapphire/framework';
+import { Command, container } from '@sapphire/framework';
+import {
+	ApplicationIntegrationType,
+	type ChatInputCommandInteraction,
+	EmbedBuilder,
+	InteractionContextType
+} from 'discord.js';
 
 @ApplyOptions<Command.Options>({
 	description: 'Start the Mafia game and assign roles/teams.',
@@ -59,7 +62,8 @@ export class UserCommand extends Command {
 		await game.startGame(); // picks up to 8 actives, assigns roles & teams
 
 		// Helpers
-		const nameFor = (id: string) => game.players.get(id)?.displayName ?? game.players.get(id)?.user?.displayName ?? 'Unknown';
+		const nameFor = (id: string) =>
+			game.players.get(id)?.displayName ?? game.players.get(id)?.user?.displayName ?? 'Unknown';
 
 		const team1 = game.activePlayerIds.filter((id) => game.players.get(id)?.team === 1).map(nameFor);
 		const team2 = game.activePlayerIds.filter((id) => game.players.get(id)?.team === 2).map(nameFor);

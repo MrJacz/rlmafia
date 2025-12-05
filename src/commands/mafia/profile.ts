@@ -1,7 +1,11 @@
 import { ApplyOptions } from '@sapphire/decorators';
-import { Command } from '@sapphire/framework';
-import { ApplicationIntegrationType, InteractionContextType, type ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
-import { container } from '@sapphire/framework';
+import { Command, container } from '@sapphire/framework';
+import {
+	ApplicationIntegrationType,
+	type ChatInputCommandInteraction,
+	EmbedBuilder,
+	InteractionContextType
+} from 'discord.js';
 
 @ApplyOptions<Command.Options>({
 	description: 'View player statistics and ELO rating.',
@@ -44,38 +48,39 @@ export class UserCommand extends Command {
 				});
 			}
 
-			const mafiaWinRate = player.mafia_rounds > 0
-				? ((player.mafia_wins / player.mafia_rounds) * 100).toFixed(1)
-				: '0.0';
+			const mafiaWinRate = player.mafiaRounds > 0 ? ((player.mafiaWins / player.mafiaRounds) * 100).toFixed(1) : '0.0';
 
-			const guessAccuracy = player.total_votes > 0
-				? ((player.correct_votes / player.total_votes) * 100).toFixed(1)
-				: '0.0';
+			const guessAccuracy =
+				player.totalVotes > 0 ? ((player.correctVotes / player.totalVotes) * 100).toFixed(1) : '0.0';
 
-			const innocentRounds = player.total_rounds - player.mafia_rounds;
+			const innocentRounds = player.totalRounds - player.mafiaRounds;
 			const allPlayers = await container.db.getLeaderboard(guild.id, 1000);
-			const rank = allPlayers.findIndex(p => p.user_id === targetUser.id) + 1;
+			const rank = allPlayers.findIndex((p) => p.userId === targetUser.id) + 1;
 
 			const embed = new EmbedBuilder()
-				.setTitle(`${player.display_name}'s Profile`)
+				.setTitle(`${player.displayName}'s Profile`)
 				.setColor(0x00bfff)
 				.setThumbnail(targetUser.displayAvatarURL())
 				.addFields(
 					{ name: 'ELO Rating', value: `**${player.elo}**`, inline: true },
-					{ name: 'Peak ELO', value: `${player.peak_elo}`, inline: true },
+					{ name: 'Peak ELO', value: `${player.peakElo}`, inline: true },
 					{ name: 'Server Rank', value: rank > 0 ? `#${rank}` : 'Unranked', inline: true },
-					{ name: 'Total Rounds', value: `${player.total_rounds}`, inline: true },
+					{ name: 'Total Rounds', value: `${player.totalRounds}`, inline: true },
 					{ name: 'Innocent Rounds', value: `${innocentRounds}`, inline: true },
-					{ name: 'Mafia Rounds', value: `${player.mafia_rounds}`, inline: true },
+					{ name: 'Mafia Rounds', value: `${player.mafiaRounds}`, inline: true },
 					{ name: 'Mafia Win Rate', value: `${mafiaWinRate}%`, inline: true },
-					{ name: 'Guess Accuracy', value: `${guessAccuracy}% (${player.correct_votes}/${player.total_votes})`, inline: true },
-					{ name: 'Mafia Wins', value: `${player.mafia_wins}`, inline: true }
+					{
+						name: 'Guess Accuracy',
+						value: `${guessAccuracy}% (${player.correctVotes}/${player.totalVotes})`,
+						inline: true
+					},
+					{ name: 'Mafia Wins', value: `${player.mafiaWins}`, inline: true }
 				)
-				.setFooter({ text: `Member since ${player.created_at.toLocaleDateString()}` });
+				.setFooter({ text: `Member since ${player.createdAt.toLocaleDateString()}` });
 
 			return interaction.editReply({ embeds: [embed] });
-		} catch (err: any) {
-			return interaction.editReply({ content: `Error: ${err?.message ?? String(err)}` });
+		} catch (err) {
+			return interaction.editReply({ content: `Error: ${err instanceof Error ? err.message : err}` });
 		}
 	}
 }

@@ -1,7 +1,12 @@
 import { ApplyOptions } from '@sapphire/decorators';
-import { Command } from '@sapphire/framework';
-import { EmbedBuilder, type Message, ApplicationIntegrationType, InteractionContextType, type ChatInputCommandInteraction } from 'discord.js';
-import { container } from '@sapphire/framework';
+import { Command, container } from '@sapphire/framework';
+import {
+	ApplicationIntegrationType,
+	type ChatInputCommandInteraction,
+	EmbedBuilder,
+	InteractionContextType,
+	type Message
+} from 'discord.js';
 
 @ApplyOptions<Command.Options>({
 	description: 'Show the current Mafia game status (players, active roster, mafia count, votes).',
@@ -41,17 +46,13 @@ export class UserCommand extends Command {
 		if (!game) return { content: 'No Mafia game found for this server.' };
 
 		// Pull data
-		const players = Array.from(game.players.values());
-		const playerNames = players.map((p) => p.user?.displayName ?? p.user?.user?.username ?? 'Unknown');
-		const activeIds = game.activePlayerIds;
-		const subsIds = game.subs;
-
-		const activeNames = activeIds.map((id) => game.players.get(id)?.user?.displayName ?? game.players.get(id)?.user?.user?.username ?? 'Unknown');
-
-		const subsNames = subsIds.map((id) => game.players.get(id)?.user?.displayName ?? game.players.get(id)?.user?.user?.username ?? 'Unknown');
+		const playerNames = game.players.map((p) => p.user?.displayName ?? p.user?.user?.username ?? 'Unknown');
+		const activeNames = game.activePlayers.map(
+			(player) => player?.user?.displayName ?? player?.user?.user?.username ?? 'Unknown'
+		);
 
 		const votesIn = game.votes.size;
-		const votesNeeded = activeIds.length || 0;
+		const votesNeeded = activeNames.length || 0;
 		const voteStatus = votesNeeded > 0 ? `${votesIn}/${votesNeeded}` : `${votesIn}`;
 
 		const embed = new EmbedBuilder()
@@ -60,14 +61,13 @@ export class UserCommand extends Command {
 			.addFields(
 				{ name: 'In Progress', value: game.inProgress ? 'Yes' : 'No', inline: true },
 				{ name: 'Configured Mafia', value: String(game.numMafia), inline: true },
-				{ name: 'Players Joined', value: String(players.length), inline: true }
+				{ name: 'Players Joined', value: String(playerNames.length), inline: true }
 			);
 
 		// Only show active/subs if we’ve done a start
-		if (activeIds.length > 0 || subsIds.length > 0) {
+		if (activeNames.length > 0) {
 			embed.addFields(
 				{ name: 'Active Players', value: activeNames.length ? sliceSafe(activeNames, 1024).join('\n') : '—' },
-				{ name: 'Subs', value: subsNames.length ? sliceSafe(subsNames, 1024).join('\n') : '—' },
 				{ name: 'Votes (this round)', value: voteStatus, inline: true }
 			);
 		}
