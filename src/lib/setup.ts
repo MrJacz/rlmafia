@@ -20,20 +20,12 @@ setup({ path: join(srcDir, '.env') });
 // Enable colorette
 colorette.createColors({ useColor: true });
 
-// Initialize database connection
-const db = new DatabaseService();
-db.connect()
-	.then(() => {
-		container.logger.info('Database connected successfully');
-	})
-	.catch((error) => {
-		container.logger.error('Failed to connect to database:', error);
-		process.exit(1);
-	});
+// Initialize database connection with Sapphire logger
+const db = new DatabaseService(process.env.DATABASE_URL);
 
 // Initialize Mafia Manager with database
 container.db = db;
-container.mafia = new MafiaManager(db);
+container.mafia = new MafiaManager();
 
 declare module '@sapphire/pieces' {
 	interface Container {

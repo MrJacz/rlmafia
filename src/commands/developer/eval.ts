@@ -1,10 +1,10 @@
+import { inspect } from 'node:util';
 import { ApplyOptions } from '@sapphire/decorators';
-import { Command, Args } from '@sapphire/framework';
+import { type Args, Command } from '@sapphire/framework';
 import { send } from '@sapphire/plugin-editable-commands';
 import { Type } from '@sapphire/type';
 import { codeBlock, isThenable } from '@sapphire/utilities';
 import type { Message } from 'discord.js';
-import { inspect } from 'util';
 
 @ApplyOptions<Command.Options>({
 	aliases: ['ev'],
@@ -42,15 +42,15 @@ export class UserCommand extends Command {
 	private async eval(message: Message, code: string, flags: { async: boolean; depth: number; showHidden: boolean }) {
 		if (flags.async) code = `(async () => {\n${code}\n})();`;
 
-		// @ts-expect-error value is never read, this is so `msg` is possible as an alias when sending the eval.
+		// @ts-expect-error - msg is available in eval context for user code
 		// eslint-disable-next-line @typescript-eslint/no-unused-vars
-		const msg = message;
+		const _msg = message;
 
 		let success = true;
 		let result = null;
 
 		try {
-			// eslint-disable-next-line no-eval
+			// biome-ignore lint/security/noGlobalEval: this is for an eval command
 			result = eval(code);
 		} catch (error) {
 			if (error && error instanceof Error && error.stack) {

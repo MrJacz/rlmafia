@@ -10,7 +10,10 @@ export class UserCommand extends Command {
 	public override registerApplicationCommands(registry: Command.Registry) {
 		// Create shared integration types and contexts
 		// These allow the command to be used in guilds and DMs
-		const integrationTypes: ApplicationIntegrationType[] = [ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall];
+		const integrationTypes: ApplicationIntegrationType[] = [
+			ApplicationIntegrationType.GuildInstall,
+			ApplicationIntegrationType.UserInstall
+		];
 		const contexts: InteractionContextType[] = [
 			InteractionContextType.BotDM,
 			InteractionContextType.Guild,
@@ -57,7 +60,9 @@ export class UserCommand extends Command {
 		return this.sendPing(interaction);
 	}
 
-	private async sendPing(interactionOrMessage: Message | Command.ChatInputCommandInteraction | Command.ContextMenuCommandInteraction) {
+	private async sendPing(
+		interactionOrMessage: Message | Command.ChatInputCommandInteraction | Command.ContextMenuCommandInteraction
+	) {
 		const pingMessage =
 			interactionOrMessage instanceof Message
 				? interactionOrMessage.channel?.isSendable() && (await interactionOrMessage.channel.send({ content: 'Ping?' }))
