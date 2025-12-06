@@ -101,7 +101,7 @@ Players now move into Rocket League and play.
 
 Players join their private Rocket League match.
 
-- Mafia attempts to subtly sabotage their team
+- Mafia attempts to subtly sabotage their team by losing
 - Villagers observe behaviour and form suspicions
 
 Bot is idle during the match.
