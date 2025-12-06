@@ -238,7 +238,7 @@ export class MafiaPlayer {
 	// Round-specific (ephemeral)
 	active: boolean = false;
 	mafia: boolean = false;
-	team: PlayerTeam = 0;
+	team: PlayerTeam = PlayerTeam.NOTEAM;
 
 	constructor(user: GuildMember, record?: PlayerRecord) {
 		this.user = user;
@@ -254,6 +254,10 @@ export class MafiaPlayer {
 			this.totalVotes = record.totalVotes;
 			this.peakElo = record.peakElo;
 		}
+	}
+
+	public getRoleMessage() {
+		return this.mafia ? 'You are **MAFIA**. Blend in, lose RL, and avoid being voted out.' : 'You are **INNOCENT**. Win RL and find the mafia.';
 	}
 
 	static fromRecord(record: PlayerRecord, member?: GuildMember): MafiaPlayer {

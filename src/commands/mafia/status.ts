@@ -16,12 +16,17 @@ export class UserCommand extends Command {
 		const integrationTypes: ApplicationIntegrationType[] = [ApplicationIntegrationType.GuildInstall];
 		const contexts: InteractionContextType[] = [InteractionContextType.Guild];
 
-		registry.registerChatInputCommand({
-			name: this.name,
-			description: this.description,
-			integrationTypes,
-			contexts
-		});
+		registry.registerChatInputCommand(
+			{
+				name: this.name,
+				description: 'Show the current Mafia game status (players, active roster, votes).',
+				integrationTypes,
+				contexts
+			},
+			{
+				idHints: []
+			}
+		);
 	}
 
 	public override async chatInputRun(interaction: ChatInputCommandInteraction) {
@@ -42,22 +47,11 @@ export class UserCommand extends Command {
 				.setDescription('No Mafia game found for this server. Use `/mafia join` to start playing!');
 		}
 
-		// Pull data
-		const players = Array.from(game.players.values());
-		const playerNames = players.map((p) => p.user?.displayName ?? p.user?.user?.username ?? 'Unknown');
-		const activeIds = game.activePlayerIds;
-		const subsIds = game.subs;
-
-		const activeNames = activeIds.map(
-			(id) => game.players.get(id)?.user?.displayName ?? game.players.get(id)?.user?.user?.username ?? 'Unknown'
-		);
-
-		const subsNames = subsIds.map(
-			(id) => game.players.get(id)?.user?.displayName ?? game.players.get(id)?.user?.user?.username ?? 'Unknown'
-		);
+		const playerNames = game.players.map((p) => p.displayName);
+		const activeNames = game.activePlayers.map(player => player.displayName)
 
 		const votesIn = game.votes.size;
-		const votesNeeded = activeIds.length || 0;
+		const votesNeeded = activeNames.length || 0;
 		const voteStatus = votesNeeded > 0 ? `${votesIn}/${votesNeeded}` : `${votesIn}`;
 
 		const embed = new EmbedBuilder()
@@ -66,14 +60,12 @@ export class UserCommand extends Command {
 			.addFields(
 				{ name: 'In Progress', value: game.inProgress ? 'Yes' : 'No', inline: true },
 				{ name: 'Game State', value: game.gameState || 'IDLE', inline: true },
-				{ name: 'Players Joined', value: String(players.length), inline: true }
+				{ name: 'Players Joined', value: String(playerNames.length), inline: true }
 			);
 
-		// Only show active/subs if we've done a start
-		if (activeIds.length > 0 || subsIds.length > 0) {
+		if (activeNames.length > 0) {
 			embed.addFields(
 				{ name: 'Active Players', value: activeNames.length ? sliceSafe(activeNames, 1024).join('\n') : '—' },
-				{ name: 'Subs', value: subsNames.length ? sliceSafe(subsNames, 1024).join('\n') : '—' },
 				{ name: 'Votes (this round)', value: voteStatus, inline: true }
 			);
 		}

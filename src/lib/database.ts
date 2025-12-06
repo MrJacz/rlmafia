@@ -65,12 +65,12 @@ export class DatabaseService {
 	}
 
 	async updateGuildState(guildId: string, state: GameState, inProgress?: boolean): Promise<void> {
-		const data = {
+		const data: { gameState: GameState; updatedAt: Date; inProgress?: boolean } = {
 			gameState: state,
 			updatedAt: new Date()
 		};
 
-		if (inProgress !== undefined) Object.defineProperty(data, 'inProgress', inProgress);
+		if (inProgress !== undefined) data.inProgress = inProgress;
 
 		await this.prisma.guild.update({
 			where: { guildId },
