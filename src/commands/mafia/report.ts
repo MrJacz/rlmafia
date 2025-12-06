@@ -1,6 +1,6 @@
 import { ApplyOptions } from '@sapphire/decorators';
 import { Command, container } from '@sapphire/framework';
-import { ApplicationIntegrationType, type ChatInputCommandInteraction, InteractionContextType } from 'discord.js';
+import { ApplicationIntegrationType, type ChatInputCommandInteraction, InteractionContextType, MessageFlags } from 'discord.js';
 import { GameState } from '../../lib/database';
 import { VotingSystem } from '../../lib/voting';
 
@@ -36,7 +36,7 @@ export class UserCommand extends Command {
 	public override async chatInputRun(interaction: ChatInputCommandInteraction): Promise<void> {
 		const guild = interaction.guild;
 		if (!guild) {
-			await interaction.reply({ content: 'You must use this command in a server.', ephemeral: true });
+			await interaction.reply({ content: 'You must use this command in a server.', flags: MessageFlags.Ephemeral });
 			return;
 		}
 
@@ -46,12 +46,12 @@ export class UserCommand extends Command {
 		const game = await container.mafia.add(guildId);
 
 		if (!game.inProgress) {
-			await interaction.reply({ content: 'No active Mafia game.', ephemeral: true });
+			await interaction.reply({ content: 'No active Mafia game.', flags: MessageFlags.Ephemeral });
 			return;
 		}
 
 		if (game.activePlayers.size === 0) {
-			await interaction.reply({ content: 'No active players to vote on.', ephemeral: true });
+			await interaction.reply({ content: 'No active players to vote on.', flags: MessageFlags.Ephemeral });
 			return;
 		}
 
@@ -66,7 +66,7 @@ export class UserCommand extends Command {
 		const { embed, rows } = VotingSystem.createVotingEmbed(game);
 
 		if (!interaction.channel || !('send' in interaction.channel)) {
-			await interaction.followUp({ content: 'Error: Could not access channel.', ephemeral: true });
+			await interaction.followUp({ content: 'Error: Could not access channel.', flags: MessageFlags.Ephemeral });
 			return;
 		}
 

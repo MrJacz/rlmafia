@@ -4,7 +4,8 @@ import {
 	ApplicationIntegrationType,
 	type ChatInputCommandInteraction,
 	EmbedBuilder,
-	InteractionContextType
+	InteractionContextType,
+	MessageFlags
 } from 'discord.js';
 import type { MafiaPlayer } from '../../lib/Mafia';
 
@@ -30,7 +31,7 @@ export class UserCommand extends Command {
 	public override async chatInputRun(interaction: ChatInputCommandInteraction): Promise<void> {
 		const guild = interaction.guild;
 		if (!guild) {
-			await interaction.reply({ content: 'You must use this command in a server.', ephemeral: true });
+			await interaction.reply({ content: 'You must use this command in a server.', flags: MessageFlags.Ephemeral });
 			return;
 		}
 

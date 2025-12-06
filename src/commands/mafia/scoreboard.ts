@@ -4,7 +4,8 @@ import {
 	ApplicationIntegrationType,
 	type ChatInputCommandInteraction,
 	EmbedBuilder,
-	InteractionContextType
+	InteractionContextType,
+	MessageFlags
 } from 'discord.js';
 
 @ApplyOptions<Command.Options>({
@@ -26,7 +27,7 @@ export class UserCommand extends Command {
 
 	public override async chatInputRun(interaction: ChatInputCommandInteraction) {
 		const guild = interaction.guild;
-		if (!guild) return interaction.reply({ content: 'You must use this command in a server.', ephemeral: true });
+		if (!guild) return interaction.reply({ content: 'You must use this command in a server.', flags: MessageFlags.Ephemeral });
 
 		await interaction.deferReply();
 

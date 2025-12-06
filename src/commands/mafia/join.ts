@@ -5,7 +5,8 @@ import {
 	ApplicationIntegrationType,
 	type ChatInputCommandInteraction,
 	type GuildMember,
-	InteractionContextType
+	InteractionContextType,
+	MessageFlags
 } from 'discord.js';
 
 @ApplyOptions<Command.Options>({
@@ -36,10 +37,10 @@ export class UserCommand extends Command {
 
 	public override async chatInputRun(interaction: ChatInputCommandInteraction) {
 		const guild = interaction.guild;
-		if (!guild) return interaction.reply({ content: 'You must use this command in a server.', ephemeral: true });
+		if (!guild) return interaction.reply({ content: 'You must use this command in a server.', flags: MessageFlags.Ephemeral });
 
 		const member = interaction.member as GuildMember | null;
-		if (!member) return interaction.reply({ content: 'Could not resolve your member profile.', ephemeral: true });
+		if (!member) return interaction.reply({ content: 'Could not resolve your member profile.', flags: MessageFlags.Ephemeral });
 
 		const result = await this.joinGame(guild.id, member);
 		return interaction.reply({ content: result, ephemeral: false });

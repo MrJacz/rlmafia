@@ -5,7 +5,8 @@ import {
 	type ChatInputCommandInteraction,
 	EmbedBuilder,
 	InteractionContextType,
-	type Message
+	type Message,
+	MessageFlags
 } from 'discord.js';
 
 @ApplyOptions<Command.Options>({
@@ -35,7 +36,7 @@ export class UserCommand extends Command {
 
 	public override async chatInputRun(interaction: ChatInputCommandInteraction) {
 		const guild = interaction.guild;
-		if (!guild) return interaction.reply({ content: 'You must use this command in a server.', ephemeral: true });
+		if (!guild) return interaction.reply({ content: 'You must use this command in a server.', flags: MessageFlags.Ephemeral });
 
 		const contentOrEmbed = this.buildStatus(guild.id);
 		return interaction.reply(contentOrEmbed);
@@ -46,10 +47,8 @@ export class UserCommand extends Command {
 		if (!game) return { content: 'No Mafia game found for this server.' };
 
 		// Pull data
-		const playerNames = game.players.map((p) => p.user?.displayName ?? p.user?.user?.username ?? 'Unknown');
-		const activeNames = game.activePlayers.map(
-			(player) => player?.user?.displayName ?? player?.user?.user?.username ?? 'Unknown'
-		);
+		const playerNames = game.players.map((player) => player.displayName || 'Unknown');
+		const activeNames = game.activePlayers.map((player) => player.displayName || 'Unknown');
 
 		const votesIn = game.votes.size;
 		const votesNeeded = activeNames.length || 0;
@@ -64,34 +63,18 @@ export class UserCommand extends Command {
 				{ name: 'Players Joined', value: String(playerNames.length), inline: true }
 			);
 
-		// Only show active/subs if we’ve done a start
 		if (activeNames.length > 0) {
 			embed.addFields(
-				{ name: 'Active Players', value: activeNames.length ? sliceSafe(activeNames, 1024).join('\n') : '—' },
+				{ name: 'Active Players', value: activeNames.length ? activeNames.join('\n') : '—' },
 				{ name: 'Votes (this round)', value: voteStatus, inline: true }
 			);
 		}
 
-		// Always show a compact player list (without roles)
 		embed.addFields({
 			name: 'All Players',
-			value: playerNames.length ? sliceSafe(playerNames, 1024).join('\n') : '—'
+			value: playerNames.length ? playerNames.join('\n') : '—'
 		});
 
 		return { embeds: [embed] };
 	}
-}
-
-/** Safely fits a list of names into an embed field by truncating. */
-function sliceSafe(names: string[], max = 1024): string[] {
-	const out: string[] = [];
-	let used = 0;
-	for (const n of names) {
-		const line = n;
-		const add = (out.length ? 1 : 0) + line.length; // +1 for newline if not first
-		if (used + add > max) break;
-		out.push(line);
-		used += add;
-	}
-	return out;
 }

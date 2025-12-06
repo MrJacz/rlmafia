@@ -1,6 +1,6 @@
 import { ApplyOptions } from '@sapphire/decorators';
 import { Command, container } from '@sapphire/framework';
-import { ApplicationIntegrationType, type ChatInputCommandInteraction, InteractionContextType } from 'discord.js';
+import { ApplicationIntegrationType, type ChatInputCommandInteraction, InteractionContextType, MessageFlags } from 'discord.js';
 
 @ApplyOptions<Command.Options>({
 	description: 'Leave the Mafia game.',
@@ -21,19 +21,19 @@ export class UserCommand extends Command {
 
 	public override async chatInputRun(interaction: ChatInputCommandInteraction) {
 		const guild = interaction.guild;
-		if (!guild) return interaction.reply({ content: 'You must use this command in a server.', ephemeral: true });
+		if (!guild) return interaction.reply({ content: 'You must use this command in a server.', flags: MessageFlags.Ephemeral });
 
 		const game = await container.mafia.add(guild.id);
 
 		if (game.inProgress) {
 			return interaction.reply({
 				content: 'Cannot leave during an active round. Wait for the round to end.',
-				ephemeral: true
+				flags: MessageFlags.Ephemeral
 			});
 		}
 
 		if (!game.players.has(interaction.user.id)) {
-			return interaction.reply({ content: 'You are not in the game.', ephemeral: true });
+			return interaction.reply({ content: 'You are not in the game.', flags: MessageFlags.Ephemeral });
 		}
 
 		await game.removePlayer(interaction.user.id);
