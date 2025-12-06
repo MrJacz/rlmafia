@@ -1,5 +1,6 @@
 // Rocket League Mafia Bot - Prisma Schema
 // PostgreSQL database schema for persistent ELO ratings and game history
+// Fully normalized relational design (no JSON fields)
 
 generator client {
 	provider = "prisma-client"
@@ -12,38 +13,47 @@ datasource db {
   provider = "postgresql"
 }
 
-// Guilds table (per-server game configuration)
+// ============================================================================
+// GUILDS - Per-server configuration
+// ============================================================================
+
 model Guild {
-  guildId         String   @id @map("guild_id") @db.VarChar(20)
-  numMafia        Int      @default(1) @map("num_mafia") @db.Integer
-  inProgress      Boolean  @default(false) @map("in_progress")
-  gameState       String   @default("IDLE") @map("game_state") @db.VarChar(20)
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  guildId          String   @id @map("guild_id") @db.VarChar(20)
+  numMafia         Int      @default(1) @map("num_mafia") @db.Integer
+  maxActivePlayers Int      @default(8) @map("max_active_players") @db.Integer
+  inProgress       Boolean  @default(false) @map("in_progress")
+  gameState        String   @default("IDLE") @map("game_state") @db.VarChar(20)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   // Relations
-  players     Player[]
-  activeRound ActiveRound?
-  gameHistory GameHistory[]
+  members GuildMember[]
+  rounds  Round[]
 
   @@map("guilds")
 }
 
-// Players table (per-server player stats and ELO ratings)
-model Player {
+// ============================================================================
+// GUILD MEMBERS - Per-guild player stats and ELO ratings
+// ============================================================================
+
+model GuildMember {
   id          Int     @id @default(autoincrement())
   guildId     String  @map("guild_id") @db.VarChar(20)
   userId      String  @map("user_id") @db.VarChar(20)
   displayName String? @map("display_name") @db.VarChar(100)
 
+  // Active player status (for subs/spectators)
+  isActive Boolean @default(true) @map("is_active")
+
   // ELO rating system
   elo          Int @default(1000)
+  peakElo      Int @default(1000) @map("peak_elo")
   totalRounds  Int @default(0) @map("total_rounds")
   mafiaRounds  Int @default(0) @map("mafia_rounds")
   mafiaWins    Int @default(0) @map("mafia_wins")
   correctVotes Int @default(0) @map("correct_votes")
   totalVotes   Int @default(0) @map("total_votes")
-  peakElo      Int @default(1000) @map("peak_elo")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -54,48 +64,118 @@ model Player {
   @@unique([guildId, userId])
   @@index([guildId, userId])
   @@index([guildId, elo(sort: Desc)])
-  @@map("players")
+  @@index([guildId, isActive])
+  @@map("guild_members")
 }
 
-// Active rounds table (current game state per guild)
-model ActiveRound {
-  id          Int      @id @default(autoincrement())
-  guildId     String   @unique @map("guild_id") @db.VarChar(20)
-  mafiaIds    String[] @map("mafia_ids")
-  innocentIds String[] @map("innocent_ids")
-  playerTeams Json     @map("player_teams") // Map of user_id -> team number (1 or 2)
-  votes       Json     @default("{}") // Map of voter_id -> suspect_id
-  winningTeam Int?     @map("winning_team") // 1 or 2, NULL until reported
-  startedAt   DateTime @default(now()) @map("started_at")
+// ============================================================================
+// ROUNDS - Unified round tracking (replaces ActiveRound + GameHistory)
+// ============================================================================
+
+model Round {
+  id              Int      @id @default(autoincrement())
+  guildId         String   @map("guild_id") @db.VarChar(20)
+
+  // Round lifecycle
+  status          String   @default("ACTIVE") @db.VarChar(20)
+  winningTeam     Int?     @map("winning_team") @db.SmallInt
+  mafiaWon        Boolean? @map("mafia_won")
+  abandonedReason String?  @map("abandoned_reason") @db.VarChar(200)
+
+  // Timestamps (track phase transitions)
+  startedAt       DateTime  @default(now()) @map("started_at")
+  reportedAt      DateTime? @map("reported_at")
+  votingStartedAt DateTime? @map("voting_started_at")
+  completedAt     DateTime? @map("completed_at")
 
   // Relations
-  guild Guild @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  guild        Guild              @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  participants RoundParticipant[]
+  votes        Vote[]
+  eloChanges   EloChange[]
 
-  @@map("active_rounds")
+  @@index([guildId, status])
+  @@index([status])
+  @@index([guildId, completedAt(sort: Desc)])
+  @@map("rounds")
 }
 
-// Game history table (completed rounds for analytics)
-model GameHistory {
+// ============================================================================
+// ROUND PARTICIPANTS - Who played in each round (replaces JSON arrays)
+// ============================================================================
+
+model RoundParticipant {
+  id        Int      @id @default(autoincrement())
+  roundId   Int      @map("round_id")
+  userId    String   @map("user_id") @db.VarChar(20)
+
+  // Role and team assignment
+  isMafia   Boolean  @map("is_mafia")
+  team      Int      @db.SmallInt
+
+  // Substitution tracking
+  isSubstitute   Boolean   @default(false) @map("is_substitute")
+  substitutedFor String?   @map("substituted_for") @db.VarChar(20)
+  substitutedAt  DateTime? @map("substituted_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  round Round @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, userId])
+  @@index([roundId, isMafia])
+  @@index([userId, isMafia])
+  @@index([roundId, team])
+  @@map("round_participants")
+}
+
+// ============================================================================
+// VOTES - Individual vote records (replaces votes JSON)
+// ============================================================================
+
+model Vote {
+  id        Int      @id @default(autoincrement())
+  roundId   Int      @map("round_id")
+  voterId   String   @map("voter_id") @db.VarChar(20)
+  suspectId String   @map("suspect_id") @db.VarChar(20)
+
+  // Vote metadata
+  isCorrect Boolean?  @map("is_correct")
+  votedAt   DateTime  @default(now()) @map("voted_at")
+
+  // Relations
+  round Round @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, voterId])
+  @@index([roundId])
+  @@index([voterId])
+  @@index([suspectId])
+  @@map("votes")
+}
+
+// ============================================================================
+// ELO CHANGES - Audit trail of all ELO adjustments (replaces eloChanges JSON)
+// ============================================================================
+
+model EloChange {
   id          Int      @id @default(autoincrement())
+  roundId     Int      @map("round_id")
   guildId     String   @map("guild_id") @db.VarChar(20)
-  mafiaIds    String[] @map("mafia_ids")
-  winningTeam Int      @map("winning_team") // Which RL team won (1 or 2)
-  mafiaWon    Boolean  @map("mafia_won") // Did mafia successfully sabotage?
-  votes       Json // Vote records
-  eloChanges  Json     @map("elo_changes") // Map of user_id -> ELO delta
-  playedAt    DateTime @default(now()) @map("played_at")
+  userId      String   @map("user_id") @db.VarChar(20)
+
+  // ELO adjustment details
+  delta       Int
+  previousElo Int      @map("previous_elo")
+  newElo      Int      @map("new_elo")
+  reason      String   @db.VarChar(100)
+
+  appliedAt   DateTime @default(now()) @map("applied_at")
 
   // Relations
-  guild Guild @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  round Round @relation(fields: [roundId], references: [id], onDelete: Cascade)
 
-  @@index([guildId, playedAt(sort: Desc)])
-  @@map("game_history")
-}
-
-// Schema migrations tracking
-model SchemaMigration {
-  version   Int      @id
-  appliedAt DateTime @default(now()) @map("applied_at")
-
-  @@map("schema_migrations")
+  @@index([roundId])
+  @@index([guildId, userId, appliedAt(sort: Desc)])
+  @@map("elo_changes")
 }
