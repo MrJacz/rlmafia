@@ -1,6 +1,6 @@
 import { container } from '@sapphire/framework';
 import { Collection, type GuildMember, type Snowflake } from 'discord.js';
-import { type EloUpdate, GameState, type PlayerRecord, PlayerTeam } from './database';
+import { type EloUpdate, GameState, type GuildMemberRecord, PlayerTeam } from './database';
 import { EloCalculator } from './elo';
 import { pickTeams } from './utils';
 
@@ -21,22 +21,31 @@ export class MafiaGame {
 		this.numMafia = guild.numMafia;
 		this.gameState = guild.gameState as GameState;
 
-		const players = await container.db.getGuildPlayers(this.guildId);
+		const members = await container.db.getGuildMembers(this.guildId);
 		this.players.clear();
-		for (const record of players) {
+		for (const record of members) {
 			this.players.set(record.userId, MafiaPlayer.fromRecord(record));
 		}
 
 		if (guild.inProgress) {
 			const round = await container.db.getActiveRound(this.guildId);
 			if (round) {
-				this.votes = new Map(Object.entries(round.votes || {}));
-
-				for (const [userId, team] of Object.entries(round.player_teams)) {
-					const player = this.players.get(userId);
+				// Load participants to restore roles and teams
+				const participants = await container.db.getRoundParticipants(round.id);
+				for (const participant of participants) {
+					const player = this.players.get(participant.userId);
 					if (player) {
-						player.team = team;
+						player.active = true;
+						player.mafia = participant.isMafia;
+						player.team = participant.team as PlayerTeam;
 					}
+				}
+
+				// Load votes
+				const votes = await container.db.getRoundVotes(round.id);
+				this.votes.clear();
+				for (const vote of votes) {
+					this.votes.set(vote.voterId, vote.suspectId);
 				}
 			}
 		}
@@ -44,7 +53,7 @@ export class MafiaGame {
 
 	async addPlayer(member: GuildMember): Promise<void> {
 		if (!this.players.has(member.id)) {
-			const record = await container.db.getOrCreatePlayer(this.guildId, member.id, member.displayName);
+			const record = await container.db.getOrCreateMember(this.guildId, member.id, member.displayName);
 			this.players.set(member.id, MafiaPlayer.fromRecord(record, member));
 		}
 	}
@@ -53,15 +62,16 @@ export class MafiaGame {
 		const player = this.players.get(id);
 		if (!player) throw new Error('Player doesnt exist');
 
-		player.reset();
+		// Remove from database
+		await container.db.removeMember(this.guildId, id);
 
+		// Remove from local collection
+		this.players.delete(id);
+
+		// Clear any votes involving this player
 		this.votes.delete(id);
 		for (const [voter, suspect] of Array.from(this.votes.entries())) {
 			if (suspect === id) this.votes.delete(voter);
-		}
-
-		if (this.gameState !== GameState.IDLE) {
-			await container.db.updateGuildActivePlayers(this.guildId, [...this.activePlayers.keys()]);
 		}
 	}
 
@@ -71,17 +81,45 @@ export class MafiaGame {
 	}
 
 	async startGame(): Promise<void> {
-		if (this.players.size < 4) throw new Error('Need at least 4 players');
+		// Get guild configuration
+		const guild = await container.db.getOrCreateGuild(this.guildId);
 
-		await this.resetGame();
+		// Get active members from database
+		const activeMembers = await container.db.getActiveMembers(this.guildId);
 
-		const maxMafia = Math.max(1, Math.min(2, Math.floor(this.activePlayers.size / 3)));
+		if (activeMembers.length < 4) throw new Error('Need at least 4 active players');
+
+		// Select up to maxActivePlayers for this round
+		const selectedMembers = activeMembers.slice(0, guild.maxActivePlayers);
+
+		// Mark selected players as active for this round
+		for (const player of this.players.values()) {
+			player.active = selectedMembers.some((m) => m.userId === player.userId);
+		}
+
+		// Calculate Mafia count (max 1/3 of active players, capped at 2)
+		const maxMafia = Math.max(1, Math.min(2, Math.floor(selectedMembers.length / 3)));
 		this.numMafia = Math.min(this.numMafia, maxMafia);
 
 		this.gameState = GameState.PLAYING;
 
+		// Assign roles and teams
 		this.assignRoles();
 		this.assignTeams();
+
+		// Create Round record in database
+		const round = await container.db.createRound(this.guildId);
+
+		// Create RoundParticipant records
+		const participants = this.activePlayers.map((player) => ({
+			userId: player.userId,
+			isMafia: player.mafia,
+			team: player.team
+		}));
+		await container.db.createParticipants(round.id, participants);
+
+		// Update guild state
+		await container.db.updateGuildState(this.guildId, GameState.PLAYING, true);
 	}
 
 	private assignRoles(): void {
@@ -112,6 +150,10 @@ export class MafiaGame {
 	async calculateElo(winningTeam: 1 | 2): Promise<Map<string, number>> {
 		if (this.gameState === GameState.IDLE) throw new Error('No round in progress');
 
+		// Get active round
+		const round = await container.db.getActiveRound(this.guildId);
+		if (!round) throw new Error('No active round found');
+
 		const playerTeams: Record<Snowflake, 1 | 2> = {};
 		for (const player of this.activePlayers.values()) {
 			if (player.team !== PlayerTeam.NOTEAM) playerTeams[player.userId] = player.team;
@@ -120,6 +162,7 @@ export class MafiaGame {
 		const voteRecord: Record<string, string> = {};
 		for (const [voterId, suspectId] of this.votes) voteRecord[voterId] = suspectId;
 
+		// Calculate ELO changes
 		const eloResults = EloCalculator.calculateRoundElo(
 			new Set(this.mafiaPlayers.keys()),
 			winningTeam,
@@ -130,6 +173,39 @@ export class MafiaGame {
 		const eloChanges = new Map<string, number>();
 		for (const result of eloResults) eloChanges.set(result.userId, result.eloDelta);
 
+		// Prepare EloChange records with reasons
+		const eloChangeData = [];
+		for (const result of eloResults) {
+			const player = this.players.get(result.userId);
+			if (!player) continue;
+
+			const isMafia = this.mafiaPlayers.has(result.userId);
+			const mafiaWon = result.eloDelta > 0 && isMafia;
+
+			let reason = '';
+			if (isMafia) {
+				reason = mafiaWon ? 'Mafia win' : 'Mafia caught';
+			} else {
+				reason = this.votes.has(result.userId)
+					? this.mafiaPlayers.has(this.votes.get(result.userId)!)
+						? 'Correct vote'
+						: 'Incorrect vote'
+					: 'No vote';
+			}
+
+			eloChangeData.push({
+				userId: result.userId,
+				delta: result.eloDelta,
+				previousElo: player.elo,
+				newElo: Math.max(0, player.elo + result.eloDelta),
+				reason
+			});
+		}
+
+		// Create ELO change audit records
+		await container.db.createEloChanges(round.id, this.guildId, eloChangeData);
+
+		// Prepare bulk ELO updates
 		const updates = new Map<string, EloUpdate>();
 		for (const [userId, delta] of eloChanges) {
 			const player = this.players.get(userId);
@@ -149,9 +225,21 @@ export class MafiaGame {
 			});
 		}
 
-		await container.db.bulkUpdateElo(this.guildId, updates);
-		await container.db.completeRound(this.guildId, winningTeam, Object.fromEntries(eloChanges));
+		// Mark votes as correct/incorrect
+		await container.db.markVotesCorrect(
+			round.id,
+			Array.from(this.mafiaPlayers.keys())
+		);
 
+		// Bulk update member ELO and stats
+		await container.db.bulkUpdateElo(this.guildId, updates);
+
+		// Complete the round
+		const mafiaTeamLost = this.mafiaPlayers.first()?.team !== winningTeam;
+		const mafiaWon = mafiaTeamLost; // TODO: Add vote detection logic
+		await container.db.completeRound(round.id, mafiaWon);
+
+		// Update local player stats
 		for (const [userId, delta] of eloChanges) {
 			const player = this.players.get(userId);
 			if (player) {
@@ -187,13 +275,54 @@ export class MafiaGame {
 			}));
 	}
 
+	async substitutePlayer(oldUserId: Snowflake, newUserId: Snowflake): Promise<void> {
+		if (this.gameState === GameState.IDLE) throw new Error('No round in progress');
+
+		const oldPlayer = this.players.get(oldUserId);
+		const newPlayer = this.players.get(newUserId);
+
+		if (!oldPlayer) throw new Error('Old player not found');
+		if (!newPlayer) throw new Error('New player not found');
+		if (!oldPlayer.active) throw new Error('Old player is not in current round');
+		if (newPlayer.active) throw new Error('New player is already in current round');
+
+		// Get active round
+		const round = await container.db.getActiveRound(this.guildId);
+		if (!round) throw new Error('No active round found');
+
+		// Create substitute participant in database
+		await container.db.substitutePlayer(round.id, oldUserId, newUserId);
+
+		// Update local state: transfer role and team
+		newPlayer.active = true;
+		newPlayer.mafia = oldPlayer.mafia;
+		newPlayer.team = oldPlayer.team;
+
+		oldPlayer.active = false;
+		oldPlayer.reset();
+
+		// Transfer any votes
+		if (this.votes.has(oldUserId)) {
+			const suspectId = this.votes.get(oldUserId)!;
+			this.votes.delete(oldUserId);
+			this.votes.set(newUserId, suspectId);
+		}
+
+		// Update votes that targeted the old player
+		for (const [voterId, suspectId] of this.votes.entries()) {
+			if (suspectId === oldUserId) {
+				this.votes.set(voterId, newUserId);
+			}
+		}
+	}
+
 	async resetGame(): Promise<void> {
 		this.gameState = GameState.IDLE;
 		this.votes.clear();
 
 		this.resetPlayers();
 
-		await container.db.resetRound(this.guildId);
+		await container.db.resetGuild(this.guildId, 'Manual reset');
 	}
 
 	private resetPlayers() {
@@ -240,7 +369,7 @@ export class MafiaPlayer {
 	mafia: boolean = false;
 	team: PlayerTeam = PlayerTeam.NOTEAM;
 
-	constructor(user: GuildMember, record?: PlayerRecord) {
+	constructor(user: GuildMember, record?: GuildMemberRecord) {
 		this.user = user;
 		this.userId = user.id;
 		this.displayName = user.displayName;
@@ -260,7 +389,7 @@ export class MafiaPlayer {
 		return this.mafia ? 'You are **MAFIA**. Blend in, lose RL, and avoid being voted out.' : 'You are **INNOCENT**. Win RL and find the mafia.';
 	}
 
-	static fromRecord(record: PlayerRecord, member?: GuildMember): MafiaPlayer {
+	static fromRecord(record: GuildMemberRecord, member?: GuildMember): MafiaPlayer {
 		// Create a pseudo GuildMember if not provided
 		if (!member) {
 			const player = new MafiaPlayer(

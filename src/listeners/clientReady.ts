@@ -9,9 +9,45 @@ const dev = process.env.NODE_ENV !== 'production';
 export class UserEvent extends Listener {
 	private readonly style = dev ? yellow : blue;
 
-	public override run() {
+	public override async run() {
 		this.printBanner();
 		this.printStoreDebugInformation();
+		await this.restoreGameState();
+	}
+
+	private async restoreGameState() {
+		const { logger, db, mafia } = this.container;
+
+		try {
+			logger.info('Checking for active rounds to restore...');
+
+			const activeRounds = await db.getAllActiveRounds();
+
+			if (activeRounds.length === 0) {
+				logger.info('No active rounds found.');
+				return;
+			}
+
+			logger.info(`Found ${activeRounds.length} active round(s). Restoring state...`);
+
+			for (const round of activeRounds) {
+				try {
+					// Initialize the game for this guild
+					// The initialize() method will load the round, participants, and votes
+					await mafia.add(round.guildId);
+
+					logger.info(
+						`Restored round ${round.id} for guild ${round.guildId} (status: ${round.status})`
+					);
+				} catch (error) {
+					logger.error(`Failed to restore round ${round.id} for guild ${round.guildId}:`, error);
+				}
+			}
+
+			logger.info('State restoration complete.');
+		} catch (error) {
+			logger.error('Failed to restore game state:', error);
+		}
 	}
 
 	private printBanner() {

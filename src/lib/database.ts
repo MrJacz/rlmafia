@@ -1,5 +1,13 @@
 import { PrismaPg } from '@prisma/adapter-pg';
-import { type ActiveRound, type GameHistory, type Guild, type Player, PrismaClient } from '../generated/prisma/client';
+import {
+	type EloChange,
+	type Guild,
+	type GuildMember,
+	PrismaClient,
+	type Round,
+	type RoundParticipant,
+	type Vote
+} from '../generated/prisma/client';
 
 export enum GameState {
 	IDLE = 'IDLE',
@@ -15,16 +23,20 @@ export enum PlayerTeam {
 	TEAM2 = 2
 }
 
+export enum RoundStatus {
+	ACTIVE = 'ACTIVE',
+	VOTING = 'VOTING',
+	COMPLETED = 'COMPLETED',
+	ABANDONED = 'ABANDONED'
+}
+
+// Type exports
 export type GuildRecord = Guild;
-export type PlayerRecord = Player;
-export type ActiveRoundRecord = ActiveRound & {
-	player_teams: Record<string, 1 | 2>;
-	votes: Record<string, string>;
-};
-export type GameHistoryRecord = GameHistory & {
-	votes: Record<string, string>;
-	elo_changes: Record<string, number>;
-};
+export type GuildMemberRecord = GuildMember;
+export type RoundRecord = Round;
+export type RoundParticipantRecord = RoundParticipant;
+export type VoteRecord = Vote;
+export type EloChangeRecord = EloChange;
 
 export interface GuildStats {
 	total_games: number;
@@ -46,6 +58,14 @@ export interface EloUpdate {
 	totalVotes?: number;
 }
 
+export interface EloChangeData {
+	userId: string;
+	delta: number;
+	previousElo: number;
+	newElo: number;
+	reason: string;
+}
+
 export class DatabaseService {
 	private adapter: PrismaPg;
 	private prisma: PrismaClient;
@@ -55,7 +75,10 @@ export class DatabaseService {
 		this.prisma = new PrismaClient({ adapter: this.adapter });
 	}
 
-	// Guild operations
+	// ============================================================================
+	// GUILD OPERATIONS
+	// ============================================================================
+
 	async getOrCreateGuild(guildId: string): Promise<GuildRecord> {
 		return this.prisma.guild.upsert({
 			where: { guildId },
@@ -65,26 +88,18 @@ export class DatabaseService {
 	}
 
 	async updateGuildState(guildId: string, state: GameState, inProgress?: boolean): Promise<void> {
-		const data: { gameState: GameState; updatedAt: Date; inProgress?: boolean } = {
+		const data: { gameState: string; updatedAt: Date; inProgress?: boolean } = {
 			gameState: state,
 			updatedAt: new Date()
 		};
 
-		if (inProgress !== undefined) data.inProgress = inProgress;
+		if (inProgress !== undefined) {
+			data.inProgress = inProgress;
+		}
 
 		await this.prisma.guild.update({
 			where: { guildId },
 			data
-		});
-	}
-
-	async updateGuildActivePlayers(guildId: string, activeIds: string[]): Promise<void> {
-		await this.prisma.guild.update({
-			where: { guildId },
-			data: {
-				activePlayerIds: activeIds,
-				updatedAt: new Date()
-			}
 		});
 	}
 
@@ -98,9 +113,25 @@ export class DatabaseService {
 		});
 	}
 
-	// Player operations
-	async getOrCreatePlayer(guildId: string, userId: string, displayName: string): Promise<PlayerRecord> {
-		return this.prisma.player.upsert({
+	async setMaxActivePlayers(guildId: string, maxActivePlayers: number): Promise<void> {
+		// Clamp between 8 and 16
+		const clamped = Math.max(8, Math.min(16, maxActivePlayers));
+
+		await this.prisma.guild.update({
+			where: { guildId },
+			data: {
+				maxActivePlayers: clamped,
+				updatedAt: new Date()
+			}
+		});
+	}
+
+	// ============================================================================
+	// GUILD MEMBER OPERATIONS
+	// ============================================================================
+
+	async getOrCreateMember(guildId: string, userId: string, displayName: string): Promise<GuildMemberRecord> {
+		return this.prisma.guildMember.upsert({
 			where: {
 				guildId_userId: {
 					guildId,
@@ -110,7 +141,8 @@ export class DatabaseService {
 			create: {
 				guildId,
 				userId,
-				displayName
+				displayName,
+				isActive: true
 			},
 			update: {
 				displayName,
@@ -119,8 +151,8 @@ export class DatabaseService {
 		});
 	}
 
-	async getPlayer(guildId: string, userId: string): Promise<PlayerRecord | null> {
-		return this.prisma.player.findUnique({
+	async getMember(guildId: string, userId: string): Promise<GuildMemberRecord | null> {
+		return this.prisma.guildMember.findUnique({
 			where: {
 				guildId_userId: {
 					guildId,
@@ -130,8 +162,8 @@ export class DatabaseService {
 		});
 	}
 
-	async removePlayer(guildId: string, userId: string): Promise<void> {
-		await this.prisma.player.delete({
+	async removeMember(guildId: string, userId: string): Promise<void> {
+		await this.prisma.guildMember.delete({
 			where: {
 				guildId_userId: {
 					guildId,
@@ -141,30 +173,58 @@ export class DatabaseService {
 		});
 	}
 
-	async getGuildPlayers(guildId: string): Promise<PlayerRecord[]> {
-		return this.prisma.player.findMany({
+	async getGuildMembers(guildId: string): Promise<GuildMemberRecord[]> {
+		return this.prisma.guildMember.findMany({
 			where: { guildId },
 			orderBy: { elo: 'desc' }
 		});
 	}
 
-	async getLeaderboard(guildId: string, limit: number = 50): Promise<PlayerRecord[]> {
-		return this.prisma.player.findMany({
+	async getActiveMembers(guildId: string): Promise<GuildMemberRecord[]> {
+		return this.prisma.guildMember.findMany({
+			where: {
+				guildId,
+				isActive: true
+			},
+			orderBy: { elo: 'desc' }
+		});
+	}
+
+	async setMemberActive(guildId: string, userId: string, isActive: boolean): Promise<void> {
+		await this.prisma.guildMember.update({
+			where: {
+				guildId_userId: {
+					guildId,
+					userId
+				}
+			},
+			data: {
+				isActive,
+				updatedAt: new Date()
+			}
+		});
+	}
+
+	async getLeaderboard(guildId: string, limit: number = 50): Promise<GuildMemberRecord[]> {
+		return this.prisma.guildMember.findMany({
 			where: { guildId },
 			orderBy: { elo: 'desc' },
 			take: limit
 		});
 	}
 
-	// ELO operations
-	async updatePlayerElo(guildId: string, userId: string, eloDelta: number, updates: Partial<EloUpdate>): Promise<void> {
-		const player = await this.getPlayer(guildId, userId);
-		if (!player) return;
+	// ============================================================================
+	// ELO OPERATIONS
+	// ============================================================================
 
-		const newElo = Math.max(0, player.elo + eloDelta);
-		const newPeakElo = Math.max(player.peakElo, newElo);
+	async updateMemberElo(guildId: string, userId: string, eloDelta: number, updates: Partial<EloUpdate>): Promise<void> {
+		const member = await this.getMember(guildId, userId);
+		if (!member) return;
 
-		await this.prisma.player.update({
+		const newElo = Math.max(0, member.elo + eloDelta);
+		const newPeakElo = Math.max(member.peakElo, newElo);
+
+		await this.prisma.guildMember.update({
 			where: {
 				guildId_userId: {
 					guildId,
@@ -187,10 +247,9 @@ export class DatabaseService {
 	async bulkUpdateElo(guildId: string, updates: Map<string, EloUpdate>): Promise<void> {
 		// Use transaction for consistency
 		await this.prisma.$transaction(
-			Array.from(updates.entries()).map(
-				([userId, update]) =>
-					this.prisma.$queryRaw`
-					UPDATE players
+			Array.from(updates.entries()).map(([userId, update]) =>
+				this.prisma.$queryRaw`
+					UPDATE guild_members
 					SET
 						elo = GREATEST(0, elo + ${update.eloDelta}),
 						peak_elo = GREATEST(peak_elo, GREATEST(0, elo + ${update.eloDelta})),
@@ -206,105 +265,300 @@ export class DatabaseService {
 		);
 	}
 
-	// Round operations
-	async startRound(
-		guildId: string,
-		mafiaIds: string[],
-		innocentIds: string[],
-		teams: Record<string, 1 | 2>
-	): Promise<void> {
-		// Delete any existing active round first
-		await this.prisma.activeRound.deleteMany({
-			where: { guildId }
-		});
+	// ============================================================================
+	// ROUND OPERATIONS
+	// ============================================================================
 
-		// Insert new active round
-		await this.prisma.activeRound.create({
+	async createRound(guildId: string): Promise<RoundRecord> {
+		return this.prisma.round.create({
 			data: {
 				guildId,
-				mafiaIds,
-				innocentIds,
-				playerTeams: teams,
-				votes: {}
+				status: RoundStatus.ACTIVE
 			}
 		});
 	}
 
-	async getActiveRound(guildId: string): Promise<ActiveRoundRecord | null> {
-		const round = await this.prisma.activeRound.findUnique({
-			where: { guildId }
+	async getRound(roundId: number): Promise<RoundRecord | null> {
+		return this.prisma.round.findUnique({
+			where: { id: roundId }
 		});
+	}
 
-		if (!round) return null;
+	async getActiveRound(guildId: string): Promise<RoundRecord | null> {
+		return this.prisma.round.findFirst({
+			where: {
+				guildId,
+				status: {
+					in: [RoundStatus.ACTIVE, RoundStatus.VOTING]
+				}
+			}
+		});
+	}
 
-		return {
-			...round,
-			player_teams: round.playerTeams as Record<string, 1 | 2>,
-			votes: round.votes as Record<string, string>
+	async updateRoundStatus(roundId: number, status: RoundStatus): Promise<void> {
+		const data: { status: string; reportedAt?: Date; votingStartedAt?: Date; completedAt?: Date } = {
+			status
 		};
-	}
 
-	async saveVote(guildId: string, voterId: string, suspectId: string): Promise<void> {
-		const round = await this.prisma.activeRound.findUnique({
-			where: { guildId }
-		});
+		if (status === RoundStatus.VOTING) {
+			data.votingStartedAt = new Date();
+		} else if (status === RoundStatus.COMPLETED || status === RoundStatus.ABANDONED) {
+			data.completedAt = new Date();
+		}
 
-		if (!round) return;
-
-		const votes = round.votes as Record<string, string>;
-		votes[voterId] = suspectId;
-
-		await this.prisma.activeRound.update({
-			where: { guildId },
-			data: { votes }
+		await this.prisma.round.update({
+			where: { id: roundId },
+			data
 		});
 	}
 
-	async completeRound(guildId: string, winningTeam: 1 | 2, eloChanges: Record<string, number>): Promise<void> {
-		// Get active round data
-		const round = await this.getActiveRound(guildId);
-		if (!round) return;
-
-		// Determine mafia win
-		const mafiaWon = Object.entries(eloChanges).some(([userId, delta]) => round.mafiaIds.includes(userId) && delta > 0);
-
-		// Insert into history
-		await this.prisma.gameHistory.create({
+	async setRoundWinner(roundId: number, winningTeam: 1 | 2): Promise<void> {
+		await this.prisma.round.update({
+			where: { id: roundId },
 			data: {
-				guildId,
-				mafiaIds: round.mafiaIds,
 				winningTeam,
+				reportedAt: new Date(),
+				status: RoundStatus.VOTING,
+				votingStartedAt: new Date()
+			}
+		});
+	}
+
+	async completeRound(roundId: number, mafiaWon: boolean): Promise<void> {
+		await this.prisma.round.update({
+			where: { id: roundId },
+			data: {
+				status: RoundStatus.COMPLETED,
 				mafiaWon,
-				votes: round.votes,
-				eloChanges: eloChanges
+				completedAt: new Date()
+			}
+		});
+	}
+
+	async abandonRound(roundId: number, reason: string): Promise<void> {
+		await this.prisma.round.update({
+			where: { id: roundId },
+			data: {
+				status: RoundStatus.ABANDONED,
+				abandonedReason: reason,
+				completedAt: new Date()
+			}
+		});
+	}
+
+	async getRecentRounds(guildId: string, limit: number = 10): Promise<RoundRecord[]> {
+		return this.prisma.round.findMany({
+			where: {
+				guildId,
+				status: RoundStatus.COMPLETED
+			},
+			orderBy: { completedAt: 'desc' },
+			take: limit
+		});
+	}
+
+	// ============================================================================
+	// ROUND PARTICIPANT OPERATIONS
+	// ============================================================================
+
+	async createParticipant(roundId: number, userId: string, isMafia: boolean, team: number): Promise<RoundParticipantRecord> {
+		return this.prisma.roundParticipant.create({
+			data: {
+				roundId,
+				userId,
+				isMafia,
+				team
+			}
+		});
+	}
+
+	async createParticipants(
+		roundId: number,
+		participants: Array<{ userId: string; isMafia: boolean; team: number }>
+	): Promise<void> {
+		await this.prisma.roundParticipant.createMany({
+			data: participants.map((p) => ({
+				roundId,
+				...p
+			}))
+		});
+	}
+
+	async getRoundParticipants(roundId: number): Promise<RoundParticipantRecord[]> {
+		return this.prisma.roundParticipant.findMany({
+			where: { roundId }
+		});
+	}
+
+	async getMafiaParticipants(roundId: number): Promise<RoundParticipantRecord[]> {
+		return this.prisma.roundParticipant.findMany({
+			where: {
+				roundId,
+				isMafia: true
+			}
+		});
+	}
+
+	async substitutePlayer(
+		roundId: number,
+		oldUserId: string,
+		newUserId: string
+	): Promise<RoundParticipantRecord> {
+		// Get the original participant's role and team
+		const originalParticipant = await this.prisma.roundParticipant.findUnique({
+			where: {
+				roundId_userId: {
+					roundId,
+					userId: oldUserId
+				}
 			}
 		});
 
-		// Delete active round
-		await this.prisma.activeRound.delete({
-			where: { guildId }
+		if (!originalParticipant) {
+			throw new Error('Original participant not found');
+		}
+
+		// Create substitute participant
+		return this.prisma.roundParticipant.create({
+			data: {
+				roundId,
+				userId: newUserId,
+				isMafia: originalParticipant.isMafia,
+				team: originalParticipant.team,
+				isSubstitute: true,
+				substitutedFor: oldUserId,
+				substitutedAt: new Date()
+			}
 		});
 	}
 
-	async resetRound(guildId: string): Promise<void> {
-		await this.prisma.activeRound.deleteMany({
-			where: { guildId }
-		});
+	// ============================================================================
+	// VOTE OPERATIONS
+	// ============================================================================
 
-		await this.updateGuildState(guildId, GameState.IDLE, false);
-		await this.updateGuildActivePlayers(guildId, []);
+	async createVote(roundId: number, voterId: string, suspectId: string): Promise<VoteRecord> {
+		return this.prisma.vote.upsert({
+			where: {
+				roundId_voterId: {
+					roundId,
+					voterId
+				}
+			},
+			create: {
+				roundId,
+				voterId,
+				suspectId
+			},
+			update: {
+				suspectId,
+				votedAt: new Date()
+			}
+		});
 	}
 
-	// Stats operations
+	async getRoundVotes(roundId: number): Promise<VoteRecord[]> {
+		return this.prisma.vote.findMany({
+			where: { roundId }
+		});
+	}
+
+	async markVotesCorrect(roundId: number, mafiaUserIds: string[]): Promise<void> {
+		await this.prisma.vote.updateMany({
+			where: {
+				roundId,
+				suspectId: {
+					in: mafiaUserIds
+				}
+			},
+			data: {
+				isCorrect: true
+			}
+		});
+
+		await this.prisma.vote.updateMany({
+			where: {
+				roundId,
+				suspectId: {
+					notIn: mafiaUserIds
+				}
+			},
+			data: {
+				isCorrect: false
+			}
+		});
+	}
+
+	// ============================================================================
+	// ELO CHANGE OPERATIONS
+	// ============================================================================
+
+	async createEloChange(
+		roundId: number,
+		guildId: string,
+		userId: string,
+		delta: number,
+		previousElo: number,
+		newElo: number,
+		reason: string
+	): Promise<EloChangeRecord> {
+		return this.prisma.eloChange.create({
+			data: {
+				roundId,
+				guildId,
+				userId,
+				delta,
+				previousElo,
+				newElo,
+				reason
+			}
+		});
+	}
+
+	async createEloChanges(roundId: number, guildId: string, changes: EloChangeData[]): Promise<void> {
+		await this.prisma.eloChange.createMany({
+			data: changes.map((change) => ({
+				roundId,
+				guildId,
+				...change
+			}))
+		});
+	}
+
+	async getRoundEloChanges(roundId: number): Promise<EloChangeRecord[]> {
+		return this.prisma.eloChange.findMany({
+			where: { roundId }
+		});
+	}
+
+	async getMemberEloHistory(guildId: string, userId: string, limit: number = 20): Promise<EloChangeRecord[]> {
+		return this.prisma.eloChange.findMany({
+			where: {
+				guildId,
+				userId
+			},
+			orderBy: { appliedAt: 'desc' },
+			take: limit
+		});
+	}
+
+	// ============================================================================
+	// STATS OPERATIONS
+	// ============================================================================
+
 	async getGuildStats(guildId: string): Promise<GuildStats> {
-		const [totalGames, playersData, topPlayer] = await Promise.all([
-			this.prisma.gameHistory.count({ where: { guildId } }),
-			this.prisma.player.aggregate({
+		const [totalGames, membersData, topMember] = await Promise.all([
+			this.prisma.round.count({
+				where: {
+					guildId,
+					status: RoundStatus.COMPLETED
+				}
+			}),
+			this.prisma.guildMember.aggregate({
 				where: { guildId },
 				_count: true,
 				_avg: { elo: true }
 			}),
-			this.prisma.player.findFirst({
+			this.prisma.guildMember.findFirst({
 				where: { guildId },
 				orderBy: { elo: 'desc' },
 				select: {
@@ -317,30 +571,51 @@ export class DatabaseService {
 
 		return {
 			total_games: totalGames,
-			total_players: playersData._count,
-			avg_elo: playersData._avg.elo || 1000,
-			top_player: topPlayer
+			total_players: membersData._count,
+			avg_elo: membersData._avg.elo || 1000,
+			top_player: topMember
 				? {
-						user_id: topPlayer.userId,
-						display_name: topPlayer.displayName || 'Unknown',
-						elo: topPlayer.elo
+						user_id: topMember.userId,
+						display_name: topMember.displayName || 'Unknown',
+						elo: topMember.elo
 					}
 				: null
 		};
 	}
 
-	async getRecentGames(guildId: string, limit: number = 10): Promise<GameHistoryRecord[]> {
-		const games = await this.prisma.gameHistory.findMany({
-			where: { guildId },
-			orderBy: { playedAt: 'desc' },
-			take: limit
-		});
+	// ============================================================================
+	// UTILITY METHODS
+	// ============================================================================
 
-		return games.map((game) => ({
-			...game,
-			votes: game.votes as Record<string, string>,
-			elo_changes: game.eloChanges as Record<string, number>
-		}));
+	/**
+	 * Reset round state for a guild (for use with /mafia reset command)
+	 */
+	async resetGuild(guildId: string, reason: string): Promise<void> {
+		const activeRound = await this.getActiveRound(guildId);
+
+		if (activeRound) {
+			await this.abandonRound(activeRound.id, reason);
+		}
+
+		await this.updateGuildState(guildId, GameState.IDLE, false);
+	}
+
+	/**
+	 * Get all active rounds across all guilds (for state restoration on bot restart)
+	 */
+	async getAllActiveRounds(): Promise<RoundRecord[]> {
+		return this.prisma.round.findMany({
+			where: {
+				status: {
+					in: [RoundStatus.ACTIVE, RoundStatus.VOTING]
+				}
+			},
+			include: {
+				guild: true,
+				participants: true,
+				votes: true
+			}
+		});
 	}
 
 	// Expose Prisma client for advanced queries
