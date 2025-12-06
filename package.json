@@ -13,7 +13,6 @@
 		"@sapphire/framework": "^5.4.0",
 		"@sapphire/plugin-editable-commands": "^4.0.4",
 		"@sapphire/plugin-logger": "^4.1.0",
-		"@sapphire/type": "^2.6.0",
 		"@sapphire/utilities": "^3.18.2",
 		"@skyra/env-utilities": "^2.0.1",
 		"colorette": "^2.0.20",
@@ -44,14 +43,10 @@
 		"lint:fix": "bunx biome lint --write .",
 		"test": "bun test",
 		"test:watch": "bun test --watch",
-		"test:ui": "vitest --ui",
 		"test:coverage": "bun test --coverage",
 		"prisma:generate": "bunx prisma generate",
 		"prisma:migrate": "bunx prisma migrate dev",
 		"prisma:push": "bunx prisma db push",
-		"prisma:studio": "bunx prisma studio",
-		"db:push": "bun run prisma:push",
-		"db:migrate": "bun run prisma:migrate",
-		"db:studio": "bun run prisma:studio"
+		"prisma:studio": "bunx prisma studio"
 	}
 }

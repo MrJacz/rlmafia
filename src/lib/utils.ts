@@ -105,3 +105,33 @@ export function pickTeams(players: MapIterator<MafiaPlayer>): { one: MafiaPlayer
 		two: teamB
 	};
 }
+
+export function deepInspect(value: unknown, depth = 2): string {
+  if (depth === 0) return '...';
+
+  // Null/undefined
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+
+  // Primitives
+  const type = typeof value;
+  if (type !== 'object') return type;
+
+  // Class name
+  const className = value.constructor?.name || 'Object';
+
+  // Arrays
+  if (Array.isArray(value)) {
+    const items = value.slice(0, 3).map(v => deepInspect(v, depth - 1));
+    return `${className}(${value.length}) [${items.join(', ')}${value.length > 3 ? '...' : ''}]`;
+  }
+
+  // Maps/Sets
+  if (value instanceof Map) return `Map(${value.size})`;
+  if (value instanceof Set) return `Set(${value.size})`;
+
+  // Objects
+  const keys = Object.keys(value as object).slice(0, 3);
+  const props = keys.map((k) => `${k}: ${deepInspect((value as Record<string, unknown>)[k], depth - 1)}`);
+  return `${className} { ${props.join(', ')}${Object.keys(value as object).length > 3 ? '...' : ''} }`;
+}

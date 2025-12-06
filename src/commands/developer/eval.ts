@@ -2,9 +2,9 @@ import { inspect } from 'node:util';
 import { ApplyOptions } from '@sapphire/decorators';
 import { type Args, Command } from '@sapphire/framework';
 import { send } from '@sapphire/plugin-editable-commands';
-import { Type } from '@sapphire/type';
 import { codeBlock, isThenable } from '@sapphire/utilities';
 import type { Message } from 'discord.js';
+import { deepInspect } from '../../lib/utils';
 
 @ApplyOptions<Command.Options>({
 	aliases: ['ev'],
@@ -60,7 +60,7 @@ export class UserCommand extends Command {
 			success = false;
 		}
 
-		const type = new Type(result).toString();
+		const type = deepInspect(result, flags.depth);
 		if (isThenable(result)) result = await result;
 
 		if (typeof result !== 'string') {
